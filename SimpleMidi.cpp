@@ -8,18 +8,6 @@
 #include <stdlib.h>
 #include <string.h>
 
-//#include <tchar.h>
-/*
-#include <windows.h>
-#include <mmreg.h>
-#pragma comment(lib, "Winmm.lib")
-*/
-
-#include <../alsa/asoundlib.h>
-
-#define _countof(a) (sizeof(a)/sizeof(*(a)))
-
-
 
 float NoteToFreq(int note)
 {
@@ -501,6 +489,11 @@ public:
 ///////////////////////////////////////////////////////////////
 
 #if _WIN32
+
+#include <windows.h>
+#include <mmreg.h>
+#pragma comment(lib, "Winmm.lib")
+
 HANDLE event;
 DWORD blocksPlayed = 0;
 
@@ -528,38 +521,40 @@ MMRESULT playLoop(Midi *pMidi, float nSeconds, int bufferCount, unsigned long sa
     waveFormat.cbSize = 0;
     waveFormat.wFormatTag = WAVE_FORMAT_IEEE_FLOAT;
     waveFormat.nChannels = 2;
-    waveFormat.nSamplesPerSec = samplesPerSecond;
-    waveFormat.wBitsPerSample = CHAR_BIT * sizeof(float);
-    waveFormat.nBlockAlign =     waveFormat.nChannels * waveFormat.wBitsPerSample / CHAR_BIT;
+    waveFormat.nSamplesPerSec  = samplesPerSecond;
+    waveFormat.wBitsPerSample  = CHAR_BIT * sizeof(float);
+    waveFormat.nBlockAlign     = waveFormat.nChannels * waveFormat.wBitsPerSample / CHAR_BIT;
     waveFormat.nAvgBytesPerSec = waveFormat.nSamplesPerSec * waveFormat.nBlockAlign;
-
-    // allocate buffer
-    size_t nBuffer = (size_t)(nSeconds * waveFormat.nChannels * waveFormat.nSamplesPerSec);
-    float *buffer = (float *)calloc(bufferCount*nBuffer, sizeof(*buffer));
-    int index = 0;
 
     HWAVEOUT hWavOut = NULL;
     MMRESULT mmresult = waveOutOpen(&hWavOut, WAVE_MAPPER, &waveFormat, (DWORD_PTR)waveOutProc, NULL, CALLBACK_FUNCTION | WAVE_ALLOWSYNC);
     if (mmresult == MMSYSERR_NOERROR)
     {
         timeBeginPeriod(1);
-        
-        int blocksRendered = 0;
-        for (;;)
-        {
-            if (GetKeyState(27) & 0x8000)
-                break;
 
-            // Pause rendering thread if we are getting too ahead
-            //
-            if (blocksRendered  >= blocksPlayed + bufferCount)
-            {
-                WaitForSingleObject(event, INFINITE);                
-            }
+		// allocate buffer
+		//
+		size_t nBuffer = (size_t)(nSeconds * waveFormat.nChannels * waveFormat.nSamplesPerSec);
+		float *buffer = (float *)malloc(bufferCount*nBuffer * sizeof(*buffer));
+		uint32_t index = 0;
+
+        int blocksRendered = 0;
+		for (;;)
+		{
+			if (GetKeyState(27) & 0x8000)
+				break;
+
+			float *buf = &buffer[index * nBuffer];
+
+			{
+				WAVEHDR hdr = { 0 };
+				hdr.dwBufferLength = (ULONG)(nBuffer * sizeof(float));
+				hdr.lpData = (LPSTR)buf;
+				mmresult = waveOutUnprepareHeader(hWavOut, &hdr, sizeof(hdr));
+			}
 
             // Render audio
             //
-            float *buf = &buffer[index * nBuffer];
             pMidi->RenderMidi(waveFormat.nSamplesPerSec, waveFormat.nChannels, nBuffer, buf);
             blocksRendered++;
 
@@ -569,25 +564,36 @@ MMRESULT playLoop(Midi *pMidi, float nSeconds, int bufferCount, unsigned long sa
                 hdr.dwBufferLength = (ULONG)(nBuffer * sizeof(float));
                 hdr.lpData = (LPSTR)buf;
                 mmresult = waveOutPrepareHeader(hWavOut, &hdr, sizeof(hdr));
-                if (mmresult == MMSYSERR_NOERROR)
-                {
-                    mmresult = waveOutWrite(hWavOut, &hdr, sizeof(hdr));
-                    if (mmresult == MMSYSERR_NOERROR)
-                    {
-                        index = (index + 1) % bufferCount;
-                    }
-                }
+				assert(mmresult == MMSYSERR_NOERROR);
+
+				mmresult = waveOutWrite(hWavOut, &hdr, sizeof(hdr));
+				assert(mmresult == MMSYSERR_NOERROR);
+
+				index = (index + 1) % bufferCount;
             }
+
+			// Pause rendering thread if next buffer is being used by the HW
+			//
+			if (blocksRendered >= blocksPlayed + bufferCount)
+			{
+				WaitForSingleObject(event, INFINITE);	
+			}			
         }
 
         timeEndPeriod(1); 
         waveOutClose(hWavOut);
+
+		free(buffer);
     }
 
-    free(buffer); 
+    
     return mmresult;
 }
+
 #elif __linux__
+
+#include <../alsa/asoundlib.h>
+#define _countof(a) (sizeof(a)/sizeof(*(a)))
 
 uint32_t blocksPlayed = 0;
 
@@ -700,7 +706,7 @@ int main(int argc, char **argv)
     Midi midi;
 	if (midi.LoadMidi("../Mario-Sheet-Music-Overworld-Main-Theme.mid"))
 	{
-		playLoop(&midi, .1, 5);
+		playLoop(&midi, .1, 2);
 		midi.UnloadMidi();
 	}
     return 0;
