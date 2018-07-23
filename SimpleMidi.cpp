@@ -3,13 +3,23 @@
 #define _USE_MATH_DEFINES 1
 #include <math.h>
 #include <stdio.h>
-#include <tchar.h>
+#include <assert.h>
+#include <stdint.h>
+#include <stdlib.h>
+#include <string.h>
 
+//#include <tchar.h>
+/*
 #include <windows.h>
 #include <mmreg.h>
-#include <assert.h>
-
 #pragma comment(lib, "Winmm.lib")
+*/
+
+#include <../alsa/asoundlib.h>
+
+#define _countof(a) (sizeof(a)/sizeof(*(a)))
+
+
 
 float NoteToFreq(int note)
 {
@@ -29,7 +39,7 @@ float playNote(float time, float freq, float vol)
 
 void printNote(unsigned char note)
 {
-    char *notes[] = { "C", "C#", "D", "D#", "E", "F", "F#", "G", "G#", "A", "A#", "B" };
+    const char *notes[] = { "C", "C#", "D", "D#", "E", "F", "F#", "G", "G#", "A", "A#", "B" };
     printf("%s%i", notes[note % 12], (note / 12)-1);
 }
 
@@ -44,8 +54,13 @@ class Piano
         unsigned char note;
     };
 
-    channel ch[20] = { 0 };
+    channel ch[20];
 public:
+    Piano()
+    {
+        for (int i = 0; i < _countof(ch); i++)
+            memset(&ch[i], 0, sizeof(channel));
+    }
     int release(char channel, unsigned char note, unsigned char velocity)
     {
         if (channel==-1)
@@ -131,9 +146,9 @@ public:
         pTrackFin = fin;
     }
 
-    DWORD GetVar()
+    uint32_t GetVar()
     {
-        DWORD out = 0;
+        uint32_t out = 0;
 
         for (;;)
         {
@@ -161,9 +176,9 @@ public:
         pTrack+= count;
     }
 
-    DWORD GetLength(int bytes)
+    uint32_t GetLength(int bytes)
     {
-        DWORD val = 0;
+        uint32_t val = 0;
         for (int i = 0; i < bytes; i++)
             val = (val << 8) + GetByte();
 
@@ -181,22 +196,23 @@ public:
 // MidiTrack
 ///////////////////////////////////////////////////////////////
 
-DWORD ticksPerQuarterNote=24;
+uint32_t ticksPerQuarterNote=24;
 float quarterNote = 24;
-DWORD bpm = 120;
+uint32_t bpm = 120;
 
 class MidiTrack : public MidiStream
 {
     float nextTime;
     int m_channel;
     unsigned char lastType;
-    bool m_omni = false;
+    bool m_omni;
 public:
 
     MidiTrack(int channel, unsigned char *ini, unsigned char *fin) : MidiStream(ini, fin)
     {
         nextTime = GetVar();
         m_channel = channel;
+        m_omni = false;
     }
 
     void play(float seconds)
@@ -246,7 +262,7 @@ public:
                 }
                 else if (metaType == 0x51)
                 {
-                    DWORD tempo = GetLength(3);
+                    uint32_t tempo = GetLength(3);
                     bpm =  60 * 1000000 / tempo;
                     printf("    tempo: %i bpm", bpm);
                 }
@@ -383,7 +399,7 @@ public:
 
             float c = (float)(bpm * ticksPerQuarterNote) / 60.0;
 
-            DWORD deltaTicks = GetVar();
+            uint32_t deltaTicks = GetVar();
             if (c >0)
                 nextTime += deltaTicks / c;
         }
@@ -396,7 +412,7 @@ public:
 
 class Midi
 {
-    float time = 0;
+    float time;
 
     MidiTrack *pTrack[50];
     int tracks;
@@ -424,16 +440,16 @@ public:
         }
     }
 
-    bool LoadMidi(char *filename)
+    bool LoadMidi(const char *filename)
     {
         FILE *f;
-        fopen_s(&f, filename, "rb");
-		
-		if (f == NULL)
-		{
-			printf("Can't open %s\n", filename);
-			return false;
-		}
+        //fopen_s(&f, filename, "rb");
+        f = fopen(filename, "rb");		
+        if (f == NULL)
+        {
+            printf("Can't open %s\n", filename);
+            return false;
+        }
 
         fseek(f, 0L, SEEK_END);
         size_t midiSize = ftell(f);
@@ -450,8 +466,8 @@ public:
         {
             ch.GetLength(4);
 
-            DWORD format = (ch.GetByte() << 8) + ch.GetByte();
-            DWORD tracks = (ch.GetByte() << 8) + ch.GetByte();
+            uint32_t format = (ch.GetByte() << 8) + ch.GetByte();
+            uint32_t tracks = (ch.GetByte() << 8) + ch.GetByte();
             ticksPerQuarterNote = (ch.GetByte() << 8) + ch.GetByte();
 
             printf("format %i, tracks %i, ticksPerQuarterNote %i\n", format, tracks, ticksPerQuarterNote);
@@ -474,17 +490,17 @@ public:
 		return true;
     }
 
-	void UnloadMidi()
-	{
-		free(midi);
-	}
-
+    void UnloadMidi()
+    {
+        free(midi);
+    }
 };
 
 ///////////////////////////////////////////////////////////////
-// Win32 Audio out and synchronization
+// Audio out and synchronization
 ///////////////////////////////////////////////////////////////
 
+#if _WIN32
 HANDLE event;
 DWORD blocksPlayed = 0;
 
@@ -534,18 +550,18 @@ MMRESULT playLoop(Midi *pMidi, float nSeconds, int bufferCount, unsigned long sa
             if (GetKeyState(27) & 0x8000)
                 break;
 
+            // Pause rendering thread if we are getting too ahead
+            //
+            if (blocksRendered  >= blocksPlayed + bufferCount)
+            {
+                WaitForSingleObject(event, INFINITE);                
+            }
+
             // Render audio
             //
             float *buf = &buffer[index * nBuffer];
             pMidi->RenderMidi(waveFormat.nSamplesPerSec, waveFormat.nChannels, nBuffer, buf);
             blocksRendered++;
-
-            // Pause rendering thread if we are getting too ahead
-            //
-            if (blocksRendered  >= blocksPlayed + bufferCount-1)
-            {
-                WaitForSingleObject(event, INFINITE);                
-            }
 
             // Play audio
             {
@@ -571,6 +587,109 @@ MMRESULT playLoop(Midi *pMidi, float nSeconds, int bufferCount, unsigned long sa
     free(buffer); 
     return mmresult;
 }
+#elif __linux__
+
+uint32_t blocksPlayed = 0;
+
+static void callback(snd_async_handler_t *pcm_callback)
+{
+    snd_pcm_t *handle = snd_async_handler_get_pcm(pcm_callback);
+    snd_pcm_sframes_t pcm_delay;
+
+    // get the number of frames in the soundcard output queue 
+
+    if (snd_pcm_delay(handle,&pcm_delay) < 0)
+	    pcm_delay = 0;
+
+    printf("Queue Frames %lu\n", pcm_delay);
+    blocksPlayed++;
+}
+
+void playLoop(Midi *pMidi, float nSeconds, int bufferCount, unsigned long samplesPerSecond = 48000)
+{
+        int channels = 2;
+
+        const char *device = "default";
+        snd_output_t *output = NULL;
+        
+        int err;
+        snd_pcm_sframes_t frames;        
+        snd_pcm_t *handle;
+        if ((err = snd_pcm_open(&handle, device, SND_PCM_STREAM_PLAYBACK, SND_PCM_ASYNC)) < 0) 
+        {
+            printf("Playback open error: %s\n", snd_strerror(err));
+            exit(EXIT_FAILURE);
+        }
+        
+        if ((err = snd_pcm_set_params(handle,
+                                      SND_PCM_FORMAT_FLOAT_LE,
+                                      SND_PCM_ACCESS_RW_INTERLEAVED,
+                                      2,
+                                      samplesPerSecond,
+                                      0,
+                                      500000 /* 0.5sec */
+                                      )) < 0) 
+        {   
+            printf("Playback open error: %s\n", snd_strerror(err));
+            exit(EXIT_FAILURE);
+        }        
+        
+        snd_pcm_nonblock(handle, 1);
+        
+        snd_async_handler_t *pcm_callback;
+        err = snd_async_add_pcm_handler(&pcm_callback,handle,callback,NULL);	        
+        if (err < 0) 
+        {
+                fprintf(stderr, "unable to add async handler %i (%s)\n", err, snd_strerror(err));
+                exit(EXIT_FAILURE);
+        }        
+        // allocate buffer
+        size_t nBuffer = (size_t)(nSeconds * channels * samplesPerSecond);
+        float *buffer = (float *)calloc(bufferCount * nBuffer, sizeof(*buffer));
+        uint32_t index = 0;
+
+        uint32_t blocksRendered = 0;
+        for (;;)
+        {
+            // Pause rendering thread if we are getting too ahead
+            //
+            if (blocksRendered  >= blocksPlayed + bufferCount)
+            {
+                printf("full-----------------------------------------\n");
+                sleep(100000);
+                //WaitForSingleObject(event, INFINITE);                
+            }        
+        
+            printf("index %i\n", index);
+        
+            // Render audio
+            //
+            float *buf = &buffer[index * nBuffer];
+            pMidi->RenderMidi(samplesPerSecond, channels, nBuffer, buf);
+            blocksRendered++;
+
+            // Play audio
+            {
+                printf("snd_pcm_writei\n");
+                frames = snd_pcm_writei(handle, buf, nBuffer/2);
+                if (frames < 0)
+                        frames = snd_pcm_recover(handle, frames, 0);
+                if (frames < 0) {
+                        printf("snd_pcm_writei failed: %s\n", snd_strerror(err));
+                        break;
+                }
+                if (frames > 0 && frames < (long)sizeof(buffer))
+                        printf("Short write (expected %li, wrote %li)\n", (long)sizeof(buffer), frames);            
+                
+                printf("Frames %lu\n", frames);
+                
+                index = (index + 1) % bufferCount;
+            }
+        }
+        
+        snd_pcm_close(handle);
+}
+#endif
 
 ///////////////////////////////////////////////////////////////
 // Main function
@@ -579,10 +698,12 @@ MMRESULT playLoop(Midi *pMidi, float nSeconds, int bufferCount, unsigned long sa
 int main(int argc, char **argv)
 {
     Midi midi;
-	if (midi.LoadMidi("..\\Mario-Sheet-Music-Overworld-Main-Theme.mid"))
+	if (midi.LoadMidi("../Mario-Sheet-Music-Overworld-Main-Theme.mid"))
 	{
 		playLoop(&midi, .1, 5);
 		midi.UnloadMidi();
 	}
     return 0;
 }
+
+
