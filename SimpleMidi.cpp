@@ -8,21 +8,23 @@
 #include <stdlib.h>
 #include <string.h>
 
+#ifndef _countof
 #define _countof(a) (sizeof(a)/sizeof(*(a)))
+#endif
 
 float NoteToFreq(int note)
 {
-    return (float)pow(2.0, (note - 49) / 12.0) * 440.0;
+    return (float)pow(2.0f, (note - 49) / 12.0f) * 440.0f;
 }
 
 float playNote(float time, float freq, float vol)
 {
-    //return (float)(vol * cosf(2 * M_PI * time * freq));
-    float v = (float)(vol * cosf(2 * M_PI * time * freq));
+    float v = (float)(cosf(2.0f * (float)M_PI * time * freq));
     if (v > 0) 
-        v = 1;
+        v = vol;
     else if (v < 0) 
-        v = -1;
+        v = -vol;
+
     return v;
 }
 
@@ -37,84 +39,107 @@ void printNote(unsigned char note)
 ///////////////////////////////////////////////////////////////
 class Piano
 {
-    struct channel
+    struct Channel
     {
-        unsigned char velocity;
+		float time;
+        uint32_t velocity;
         unsigned char note;
     };
 
-    channel ch[20];
+    Channel m_channel[20];
+	float m_noteDuration;
+
 public:
     Piano()
     {
-        for (int i = 0; i < _countof(ch); i++)
-            memset(&ch[i], 0, sizeof(channel));
-    }
-    int release(char channel, unsigned char note, unsigned char velocity)
-    {
-        if (channel==-1)
-        {
-            for (int i = 0; i < _countof(ch); i++)
-            {
-                if (ch[i].note == note)
-                {
-                    ch[i].note = 0;
-                    return i;
-                }
-            }
-        }
-        else
-        {
-            ch[channel].note = 0;
-        }
-        return -1;
+		m_noteDuration = 0.3f; // in seconds
+
+        for (int i = 0; i < _countof(m_channel); i++)
+            memset(&m_channel[i], 0, sizeof(Channel));
     }
 
-    int push(char channel, unsigned char note, unsigned char velocity)
-    {        
-        if (channel == -1)
+    int release(float t, char channelId, unsigned char note, unsigned char velocity)
+    {
+		if (channelId == -1)
+		{
+			for (int i = 0; i < _countof(m_channel); i++)
+			{
+				if (m_channel[i].note == note)
+				{
+					channelId = i;
+					break;
+				}
+			}
+		}
+
+        if (channelId >=0)
         {
-            for (int i = 0; i < _countof(ch); i++)
+            m_channel[channelId].note = 0;
+			m_channel[channelId].velocity = velocity;
+			m_channel[channelId].time = t;
+		}
+
+        return channelId;
+    }
+
+    int push(float t, char channelId, unsigned char note, unsigned char velocity)
+    {        
+        if (channelId == -1)
+        {
+            for (int i = 0; i < _countof(m_channel); i++)
             {
-                if (ch[i].note == 0)
+                if (m_channel[i].note == 0)
                 {
-                    ch[i].note = note;
-                    return i;
+					channelId = i;
+					break;
                 }
             }
         }
-        else
-        {
-            ch[channel].note = note;
-        }
-        return -1;
+
+		if (channelId >= 0)
+		{
+			m_channel[channelId].note = note;
+			m_channel[channelId].velocity = velocity;
+			m_channel[channelId].time = t;
+		}
+
+		return channelId;
     }
 
     float synthesize(float time)
     {
         float val = 0;
-        for (int t = 0; t < _countof(ch); t++)
+        
+		for (int i = 0; i < _countof(m_channel); i++)
         {
-            if (ch[t].note > 0)
-                val += playNote(time, NoteToFreq(ch[t].note), 1);
+			if (m_channel[i].note > 0)
+			{
+				float vol = ((m_channel[i].time + m_noteDuration) - time) / m_noteDuration;
+
+				if (vol > 0)
+					val += playNote(time, NoteToFreq(m_channel[i].note), vol);
+				else
+					m_channel[i].note = 0;
+			}
         }
-        val /= _countof(ch);
-        return val;
+
+        val /= _countof(m_channel);
+
+		return val;
     }
 
-    float print()
+    float printKeyboard()
     {
         char keyboard[128+1];
         for (int i = 0; i < 128; i++)
-        {
             keyboard[i] = '.';
-        }
-        keyboard[128] = 0;
+		keyboard[128] = 0;
 
-        for (int t = 0; t < _countof(ch); t++)
-            if (ch[t].note > 0)
-                keyboard[ch[t].note] = '#';
-        printf("%s\n", keyboard);
+        for (int t = 0; t < _countof(m_channel); t++)
+            if (m_channel[t].note > 0)
+                keyboard[m_channel[t].note] = '#';
+
+		printf("%s\n", keyboard);
     }
 };
 
@@ -126,13 +151,13 @@ Piano piano;
 class MidiStream
 {
 public:
-    unsigned char *pTrack = NULL;
-    unsigned char *pTrackFin = NULL;
+    unsigned char *m_pTrack = NULL;
+    unsigned char *m_pTrackFin = NULL;
 
     MidiStream(unsigned char *ini, unsigned char *fin)
     {
-        pTrack = ini;
-        pTrackFin = fin;
+        m_pTrack = ini;
+        m_pTrackFin = fin;
     }
 
     uint32_t GetVar()
@@ -142,27 +167,32 @@ public:
         for (;;)
         {
             out <<= 7;
-            out += *pTrack & 0x7f;
+            out += *m_pTrack & 0x7f;
 
-            if ((*pTrack & 0x80) == 0x00)
+            if ((*m_pTrack & 0x80) == 0x00)
                 break;
 
-            pTrack++;
+            m_pTrack++;
         }
 
-        pTrack++;
+        m_pTrack++;
 
         return out;
     }
 
+    void Back()
+    {
+        m_pTrack--;
+    }
+
     unsigned char GetByte()
     {
-        return *pTrack++;
+        return *m_pTrack++;
     }
 
     void Skip(int count)
     {
-        pTrack+= count;
+        m_pTrack+= count;
     }
 
     uint32_t GetLength(int bytes)
@@ -176,7 +206,7 @@ public:
 
     bool done()
     {
-        int left = pTrackFin - pTrack;
+        int left = m_pTrackFin - m_pTrack;
         return left <= 0;
     }
 };
@@ -191,22 +221,22 @@ uint32_t bpm = 120;
 
 class MidiTrack : public MidiStream
 {
-    float nextTime;
-    int m_channel;
-    unsigned char lastType;
-    bool m_omni;
+	bool m_omni;
+	float m_nextTime;
+	uint32_t m_channel;
+	unsigned char m_lastType;
 public:
 
-    MidiTrack(int channel, unsigned char *ini, unsigned char *fin) : MidiStream(ini, fin)
+    MidiTrack(uint32_t channel, unsigned char *ini, unsigned char *fin) : MidiStream(ini, fin)
     {
-        nextTime = GetVar();
+        m_nextTime = (float)GetVar();
         m_channel = channel;
         m_omni = false;
     }
 
     void play(float seconds)
     {
-        while (nextTime <= seconds)
+        while (m_nextTime <= seconds)
         {
             if (done() == true)
             {
@@ -215,8 +245,18 @@ public:
 
             unsigned char type = GetByte();
             
+            if ((type & 0x80) == 0)
+            {
+                Back();
+                type = m_lastType;
+            }
+            else
+            {                    
+                m_lastType = type;
+            }
+
             printf("%i ", m_channel);
-            printf("%6.3f ", nextTime);
+            printf("%6.3f ", m_nextTime);
             printf("0x%02x ", type);            
 
             if (type == 0xff)
@@ -266,11 +306,11 @@ public:
                 else if (metaType == 0x58)
                 {
                     unsigned char nn = GetByte();
-                    unsigned char dd = pow(2,GetByte());
+                    unsigned char dd = (unsigned char)pow(2,GetByte());
                     unsigned char cc = GetByte();
                     unsigned char bb = GetByte();
                     
-                    quarterNote = 100000.0 / (float)cc;
+                    quarterNote = 100000.0f / (float)cc;
 
                     printf("    time sig: %i/%i MIDI clocks per quarter-dotted %i", nn,dd, cc);
                 }
@@ -304,36 +344,23 @@ public:
             }
             else
             {
-                unsigned char param1;
-
-                if ((type & 0x80) == 0)
-                {
-                    param1 = type;
-                    type = lastType;
-                }
-                else
-                {
-                    param1 = GetByte();
-                    lastType = type;
-                }
-
                 unsigned char subType = type >> 4;
                 unsigned char channel = type & 0xf;
 
                 if (subType == 0x8 || subType == 0x9)
                 {                    
-                    unsigned char key = param1;
+                    unsigned char key = GetByte();
                     unsigned char speed = GetByte();
 
                     int i;
 
                     if (subType == 8)
                     {
-                        i = piano.release(m_omni ? channel : -1, key, speed);
+                        i = piano.release(seconds, m_omni ? channel : -1, key, speed);
                     }
                     else if (subType == 9)
                     {
-                        i = piano.push(m_omni ? channel : -1, key, speed);
+                        i = piano.push(seconds, m_omni ? channel : -1, key, speed);
                     }
 
                     //'printf("    ac: %c ch: %i note: ", channel + 0*(subType == 8) ?'^':'v', i);
@@ -342,14 +369,14 @@ public:
                 }
                 else if (subType == 0xA)
                 {
-                    unsigned char cc = param1;
+                    unsigned char cc = GetByte();
                     unsigned char nn = GetByte();
 
                     //printf("    ch: %i ch: %i controller: %2i controller: %2i", channel, m_channel, cc, nn);
                 }
                 else if (subType == 0xB)
                 {
-                    unsigned char cc = param1;
+                    unsigned char cc = GetByte();
                     unsigned char nn = GetByte();
 
                     if (cc == 0x78)
@@ -368,10 +395,11 @@ public:
                 }
                 else if (subType >= 0xC && subType <= 0xE)
                 {
+					unsigned char val = GetByte();
                 }
                 else if (subType == 0xE)
                 {
-                    unsigned char lsb = param1;
+                    unsigned char lsb = GetByte();
                     unsigned char msb = GetByte();
                 }
                 else
@@ -386,11 +414,11 @@ public:
             if (done())
                 break;
 
-            float c = (float)(bpm * ticksPerQuarterNote) / 60.0;
+            float c = (float)(bpm * ticksPerQuarterNote) / 60.0f;
 
             uint32_t deltaTicks = GetVar();
             if (c >0)
-                nextTime += deltaTicks / c;
+                m_nextTime += deltaTicks / c;
         }
     }
 };
@@ -404,23 +432,23 @@ class Midi
     float time;
 
     MidiTrack *pTrack[50];
-    int tracks;
+    uint32_t tracks;
 
 	unsigned char *midi;
 
 public:
-    void RenderMidi(int sampleRate, int channels, size_t size, float *pOut)
+    void RenderMidi(uint32_t sampleRate, uint32_t channels, size_t size, float *pOut)
     {
-        for (size_t i = 0; i < size; i++)
+        for (uint32_t i = 0; i < size; i++)
         {
-            for (size_t t = 0; t < tracks; t++)
+            for (uint32_t t = 0; t < tracks; t++)
             {
                 pTrack[t]->play(time);
             }
 
             float val = piano.synthesize(time);
 
-            time += 1.0 / sampleRate;
+            time += 1.0f / sampleRate;
 
             for (unsigned short j = 0; j < channels; j++)
             {
@@ -431,9 +459,7 @@ public:
 
     bool LoadMidi(const char *filename)
     {
-        FILE *f;
-        //fopen_s(&f, filename, "rb");
-        f = fopen(filename, "rb");		
+        FILE *f = fopen(filename, "rb");		
         if (f == NULL)
         {
             printf("Can't open %s\n", filename);
@@ -468,7 +494,7 @@ public:
             if (ch.GetByte() == 'M' && ch.GetByte() == 'T' && ch.GetByte() == 'r' && ch.GetByte() == 'k')
             {
                 int length = ch.GetLength(4);
-                pTrack[tracks] = new MidiTrack(tracks, ch.pTrack, ch.pTrack + length);
+                pTrack[tracks] = new MidiTrack(tracks, ch.m_pTrack, ch.m_pTrack + length);
                 ch.Skip(length);
                 tracks++;
             }
@@ -496,7 +522,7 @@ public:
 #pragma comment(lib, "Winmm.lib")
 
 HANDLE event;
-DWORD blocksPlayed = 0;
+uint32_t blocksPlayed = 0;
 
 void CALLBACK waveOutProc(HWAVEOUT hwo, UINT uMsg, DWORD_PTR dwInstance, DWORD_PTR dwParam1, DWORD_PTR dwParam2)
 {    
@@ -539,11 +565,11 @@ MMRESULT playLoop(Midi *pMidi, float nSeconds, uint32_t samplesPerSecond = 48000
 		// allocate buffer
 		//
 		uint32_t frameSize = channels * sizeof(float);
-		uint32_t nBuffer = (nSeconds * samplesPerSecond);
+		uint32_t nBuffer = (uint32_t)(nSeconds * samplesPerSecond);
 		float *buffer = (float *)malloc(bufferCount * nBuffer * frameSize);
 		uint32_t index = 0;
 
-        int blocksRendered = 0;
+		uint32_t blocksRendered = 0;
 		for (;;)
 		{
 			if (GetKeyState(27) & 0x8000)
@@ -713,7 +739,7 @@ int main(int argc, char **argv)
     Midi midi;
 	if (midi.LoadMidi("../Mario-Sheet-Music-Overworld-Main-Theme.mid"))
 	{
-		playLoop(&midi, .1);
+		playLoop(&midi, .1f);
 		midi.UnloadMidi();
 	}
     return 0;
