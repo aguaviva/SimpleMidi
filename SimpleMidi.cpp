@@ -411,7 +411,7 @@ class Midi
 public:
     void RenderMidi(int sampleRate, int channels, size_t size, float *pOut)
     {
-        for (size_t i = 0; i < size; i += channels)
+        for (size_t i = 0; i < size; i++)
         {
             for (size_t t = 0; t < tracks; t++)
             {
@@ -424,7 +424,7 @@ public:
 
             for (unsigned short j = 0; j < channels; j++)
             {
-                pOut[i + j] = val;
+                *pOut++ = val;
             }
         }
     }
@@ -537,8 +537,8 @@ MMRESULT playLoop(Midi *pMidi, float nSeconds, unsigned long samplesPerSecond = 
 
 		// allocate buffer
 		//
-		size_t nBuffer = (size_t)(nSeconds * waveFormat.nChannels * waveFormat.nSamplesPerSec);
-		float *buffer = (float *)malloc(bufferCount*nBuffer * sizeof(*buffer));
+		size_t nBuffer = (size_t)(nSeconds * waveFormat.nSamplesPerSec);
+		float *buffer = (float *)malloc(bufferCount * nBuffer * waveFormat.nChannels * sizeof(*buffer));
 		uint32_t index = 0;
 
         int blocksRendered = 0;
@@ -651,7 +651,7 @@ void playLoop(Midi *pMidi, float nSeconds, unsigned long samplesPerSecond = 4800
     snd_pcm_get_params(	pcm_handle, &buffer_size, &period_size);	        
     printf("Output buffer and period size %lu, %lu\n", buffer_size, period_size);
     
-        
+    // set async mode    
     snd_async_handler_t *pcm_callback;
     err = snd_async_add_pcm_handler(&pcm_callback,pcm_handle,callback,NULL);	        
     if (err < 0) 
@@ -660,7 +660,6 @@ void playLoop(Midi *pMidi, float nSeconds, unsigned long samplesPerSecond = 4800
         exit(EXIT_FAILURE);
     } 
            
-
     // allocate buffer
     float *buffer = (float *)calloc(buffer_size, frameSize);
     nBuffer = (size_t)(period_size);  
@@ -673,7 +672,7 @@ void playLoop(Midi *pMidi, float nSeconds, unsigned long samplesPerSecond = 4800
         // Render audio
         //
         float *buf = &buffer[index * nBuffer];
-        pMidi->RenderMidi(samplesPerSecond, channels, nBuffer*2, buf);
+        pMidi->RenderMidi(samplesPerSecond, channels, nBuffer, buf);
         blocksRendered++;
 
         // Play audio
@@ -696,8 +695,7 @@ void playLoop(Midi *pMidi, float nSeconds, unsigned long samplesPerSecond = 4800
         if (blocksRendered  >= blocksPlayed + bufferCount)
         {
             pthread_cond_wait(&condition, &signalMutex);
-        }   
-             
+        }            
     }
     
     snd_pcm_close(pcm_handle);
