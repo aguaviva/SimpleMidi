@@ -41,18 +41,18 @@ class Piano
 {
     struct Channel
     {
-		float time;
+        float time;
         uint32_t velocity;
         unsigned char note;
     };
 
     Channel m_channel[20];
-	float m_noteDuration;
+    float m_noteDuration;
 
 public:
     Piano()
     {
-		m_noteDuration = 0.3f; // in seconds
+        m_noteDuration = 0.3f; // in seconds
 
         for (int i = 0; i < _countof(m_channel); i++)
             memset(&m_channel[i], 0, sizeof(Channel));
@@ -60,24 +60,24 @@ public:
 
     int release(float t, char channelId, unsigned char note, unsigned char velocity)
     {
-		if (channelId == -1)
-		{
-			for (int i = 0; i < _countof(m_channel); i++)
-			{
-				if (m_channel[i].note == note)
-				{
-					channelId = i;
-					break;
-				}
-			}
-		}
+        if (channelId == -1)
+        {
+            for (int i = 0; i < _countof(m_channel); i++)
+            {
+                if (m_channel[i].note == note)
+                {
+                    channelId = i;
+                    break;
+                }
+            }
+        }
 
         if (channelId >=0)
         {
             m_channel[channelId].note = 0;
-			m_channel[channelId].velocity = velocity;
-			m_channel[channelId].time = t;
-		}
+            m_channel[channelId].velocity = velocity;
+            m_channel[channelId].time = t;
+        }
 
         return channelId;
     }
@@ -90,42 +90,42 @@ public:
             {
                 if (m_channel[i].note == 0)
                 {
-					channelId = i;
-					break;
+                    channelId = i;
+                    break;
                 }
             }
         }
 
-		if (channelId >= 0)
-		{
-			m_channel[channelId].note = note;
-			m_channel[channelId].velocity = velocity;
-			m_channel[channelId].time = t;
-		}
+        if (channelId >= 0)
+        {
+            m_channel[channelId].note = note;
+            m_channel[channelId].velocity = velocity;
+            m_channel[channelId].time = t;
+        }
 
-		return channelId;
+        return channelId;
     }
 
     float synthesize(float time)
     {
         float val = 0;
         
-		for (int i = 0; i < _countof(m_channel); i++)
+        for (int i = 0; i < _countof(m_channel); i++)
         {
-			if (m_channel[i].note > 0)
-			{
-				float vol = ((m_channel[i].time + m_noteDuration) - time) / m_noteDuration;
+            if (m_channel[i].note > 0)
+            {
+                float vol = ((m_channel[i].time + m_noteDuration) - time) / m_noteDuration;
 
-				if (vol > 0)
-					val += playNote(time, NoteToFreq(m_channel[i].note), vol);
-				else
-					m_channel[i].note = 0;
-			}
+                if (vol > 0)
+                    val += playNote(time, NoteToFreq(m_channel[i].note), vol);
+                else
+                    m_channel[i].note = 0;
+            }
         }
 
         val /= _countof(m_channel);
 
-		return val;
+        return val;
     }
 
     float printKeyboard()
@@ -133,13 +133,13 @@ public:
         char keyboard[128+1];
         for (int i = 0; i < 128; i++)
             keyboard[i] = '.';
-		keyboard[128] = 0;
+        keyboard[128] = 0;
 
         for (int t = 0; t < _countof(m_channel); t++)
             if (m_channel[t].note > 0)
                 keyboard[m_channel[t].note] = '#';
 
-		printf("%s\n", keyboard);
+        printf("%s\n", keyboard);
     }
 };
 
@@ -221,10 +221,10 @@ uint32_t bpm = 120;
 
 class MidiTrack : public MidiStream
 {
-	bool m_omni;
-	float m_nextTime;
-	uint32_t m_channel;
-	unsigned char m_lastType;
+    bool m_omni;
+    float m_nextTime;
+    uint32_t m_channel;
+    unsigned char m_lastType;
 public:
 
     MidiTrack(uint32_t channel, unsigned char *ini, unsigned char *fin) : MidiStream(ini, fin)
@@ -395,7 +395,7 @@ public:
                 }
                 else if (subType >= 0xC && subType <= 0xE)
                 {
-					unsigned char val = GetByte();
+                    unsigned char val = GetByte();
                 }
                 else if (subType == 0xE)
                 {
@@ -434,7 +434,7 @@ class Midi
     MidiTrack *pTrack[50];
     uint32_t tracks;
 
-	unsigned char *midi;
+    unsigned char *midi;
 
 public:
     void RenderMidi(uint32_t sampleRate, uint32_t channels, size_t size, float *pOut)
@@ -459,7 +459,7 @@ public:
 
     bool LoadMidi(const char *filename)
     {
-        FILE *f = fopen(filename, "rb");		
+        FILE *f = fopen(filename, "rb");
         if (f == NULL)
         {
             printf("Can't open %s\n", filename);
@@ -502,7 +502,7 @@ public:
 
         time = 0;
 
-		return true;
+        return true;
     }
 
     void UnloadMidi()
@@ -544,9 +544,9 @@ void CALLBACK waveOutProc(HWAVEOUT hwo, UINT uMsg, DWORD_PTR dwInstance, DWORD_P
 
 MMRESULT playLoop(Midi *pMidi, float nSeconds, uint32_t samplesPerSecond = 48000)
 {
-	uint32_t channels = 2;
-	uint32_t bufferCount = 2;
-    
+    uint32_t channels = 2;
+    uint32_t bufferCount = 2;
+
     WAVEFORMATEX waveFormat = { 0 };
     waveFormat.cbSize = 0;
     waveFormat.wFormatTag = WAVE_FORMAT_IEEE_FLOAT;
@@ -562,27 +562,27 @@ MMRESULT playLoop(Midi *pMidi, float nSeconds, uint32_t samplesPerSecond = 48000
     {
         timeBeginPeriod(1);
 
-		// allocate buffer
-		//
-		uint32_t frameSize = channels * sizeof(float);
-		uint32_t nBuffer = (uint32_t)(nSeconds * samplesPerSecond);
-		float *buffer = (float *)malloc(bufferCount * nBuffer * frameSize);
-		uint32_t index = 0;
+        // allocate buffer
+        //
+        uint32_t frameSize = channels * sizeof(float);
+        uint32_t nBuffer = (uint32_t)(nSeconds * samplesPerSecond);
+        float *buffer = (float *)malloc(bufferCount * nBuffer * frameSize);
+        uint32_t index = 0;
 
-		uint32_t blocksRendered = 0;
-		for (;;)
-		{
-			if (GetKeyState(27) & 0x8000)
-				break;
+        uint32_t blocksRendered = 0;
+        for (;;)
+        {
+            if (GetKeyState(27) & 0x8000)
+                break;
 
-			float *buf = &buffer[index * nBuffer  * channels];
+            float *buf = &buffer[index * nBuffer  * channels];
 
-			{
-				WAVEHDR hdr = { 0 };
-				hdr.dwBufferLength = (ULONG)(nBuffer * frameSize);
-				hdr.lpData = (LPSTR)buf;
-				mmresult = waveOutUnprepareHeader(hWavOut, &hdr, sizeof(hdr));
-			}
+            {
+                WAVEHDR hdr = { 0 };
+                hdr.dwBufferLength = (ULONG)(nBuffer * frameSize);
+                hdr.lpData = (LPSTR)buf;
+                mmresult = waveOutUnprepareHeader(hWavOut, &hdr, sizeof(hdr));
+            }
 
             // Render audio
             //
@@ -595,29 +595,29 @@ MMRESULT playLoop(Midi *pMidi, float nSeconds, uint32_t samplesPerSecond = 48000
                 hdr.dwBufferLength = (ULONG)(nBuffer * frameSize);
                 hdr.lpData = (LPSTR)buf;
                 mmresult = waveOutPrepareHeader(hWavOut, &hdr, sizeof(hdr));
-				assert(mmresult == MMSYSERR_NOERROR);
+                assert(mmresult == MMSYSERR_NOERROR);
 
-				mmresult = waveOutWrite(hWavOut, &hdr, sizeof(hdr));
-				assert(mmresult == MMSYSERR_NOERROR);
+                mmresult = waveOutWrite(hWavOut, &hdr, sizeof(hdr));
+                assert(mmresult == MMSYSERR_NOERROR);
 
-				index = (index + 1) % bufferCount;
+                index = (index + 1) % bufferCount;
             }
 
-			// Pause rendering thread if next buffer is being used by the HW
-			//
-			if (blocksRendered >= blocksPlayed + bufferCount)
-			{
-				WaitForSingleObject(event, INFINITE);	
-			}			
+            // Pause rendering thread if next buffer is being used by the HW
+            //
+            if (blocksRendered >= blocksPlayed + bufferCount)
+            {
+                WaitForSingleObject(event, INFINITE);
+            }
         }
 
         timeEndPeriod(1); 
         waveOutClose(hWavOut);
 
-		free(buffer);
+        free(buffer);
     }
 
-    
+
     return mmresult;
 }
 
@@ -676,12 +676,12 @@ void playLoop(Midi *pMidi, float nSeconds, uint32_t  samplesPerSecond = 48000)
         
     snd_pcm_uframes_t buffer_size;
     snd_pcm_uframes_t period_size;
-    snd_pcm_get_params(	pcm_handle, &buffer_size, &period_size);	        
+    snd_pcm_get_params(	pcm_handle, &buffer_size, &period_size);
     printf("Output buffer and period size %lu, %lu\n", buffer_size, period_size);
     
     // set async mode    
     snd_async_handler_t *pcm_callback;
-    err = snd_async_add_pcm_handler(&pcm_callback,pcm_handle,callback,NULL);	        
+    err = snd_async_add_pcm_handler(&pcm_callback,pcm_handle,callback,NULL);
     if (err < 0) 
     {
         fprintf(stderr, "unable to add async handler %i (%s)\n", err, snd_strerror(err));
@@ -713,7 +713,7 @@ void playLoop(Midi *pMidi, float nSeconds, uint32_t  samplesPerSecond = 48000)
                     break;
             }
             //if (frames > 0 && frames < (long)sizeof(buffer))
-            //    printf("Short write (expected %li, wrote %li)\n", (long)sizeof(buffer), frames);            
+            //    printf("Short write (expected %li, wrote %li)\n", (long)sizeof(buffer), frames);
             
             index = (index + 1) % bufferCount;
         }
@@ -737,11 +737,11 @@ void playLoop(Midi *pMidi, float nSeconds, uint32_t  samplesPerSecond = 48000)
 int main(int argc, char **argv)
 {
     Midi midi;
-	if (midi.LoadMidi("../Mario-Sheet-Music-Overworld-Main-Theme.mid"))
-	{
-		playLoop(&midi, .1f);
-		midi.UnloadMidi();
-	}
+    if (midi.LoadMidi("../Mario-Sheet-Music-Overworld-Main-Theme.mid"))
+    {
+        playLoop(&midi, .1f);
+        midi.UnloadMidi();
+    }
     return 0;
 }
 
