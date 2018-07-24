@@ -516,14 +516,15 @@ void CALLBACK waveOutProc(HWAVEOUT hwo, UINT uMsg, DWORD_PTR dwInstance, DWORD_P
     }
 }
 
-MMRESULT playLoop(Midi *pMidi, float nSeconds, unsigned long samplesPerSecond = 48000)
+MMRESULT playLoop(Midi *pMidi, float nSeconds, uint32_t samplesPerSecond = 48000)
 {
-    int bufferCount = 2;
+	uint32_t channels = 2;
+	uint32_t bufferCount = 2;
     
     WAVEFORMATEX waveFormat = { 0 };
     waveFormat.cbSize = 0;
     waveFormat.wFormatTag = WAVE_FORMAT_IEEE_FLOAT;
-    waveFormat.nChannels = 2;
+    waveFormat.nChannels = channels;
     waveFormat.nSamplesPerSec  = samplesPerSecond;
     waveFormat.wBitsPerSample  = CHAR_BIT * sizeof(float);
     waveFormat.nBlockAlign     = waveFormat.nChannels * waveFormat.wBitsPerSample / CHAR_BIT;
@@ -537,8 +538,9 @@ MMRESULT playLoop(Midi *pMidi, float nSeconds, unsigned long samplesPerSecond = 
 
 		// allocate buffer
 		//
-		size_t nBuffer = (size_t)(nSeconds * waveFormat.nSamplesPerSec);
-		float *buffer = (float *)malloc(bufferCount * nBuffer * waveFormat.nChannels * sizeof(*buffer));
+		uint32_t frameSize = channels * sizeof(float);
+		uint32_t nBuffer = (nSeconds * samplesPerSecond);
+		float *buffer = (float *)malloc(bufferCount * nBuffer * frameSize);
 		uint32_t index = 0;
 
         int blocksRendered = 0;
@@ -547,11 +549,11 @@ MMRESULT playLoop(Midi *pMidi, float nSeconds, unsigned long samplesPerSecond = 
 			if (GetKeyState(27) & 0x8000)
 				break;
 
-			float *buf = &buffer[index * nBuffer];
+			float *buf = &buffer[index * nBuffer  * channels];
 
 			{
 				WAVEHDR hdr = { 0 };
-				hdr.dwBufferLength = (ULONG)(nBuffer * sizeof(float));
+				hdr.dwBufferLength = (ULONG)(nBuffer * frameSize);
 				hdr.lpData = (LPSTR)buf;
 				mmresult = waveOutUnprepareHeader(hWavOut, &hdr, sizeof(hdr));
 			}
@@ -564,7 +566,7 @@ MMRESULT playLoop(Midi *pMidi, float nSeconds, unsigned long samplesPerSecond = 
             // Play audio
             {
                 WAVEHDR hdr = { 0 };
-                hdr.dwBufferLength = (ULONG)(nBuffer * sizeof(float));
+                hdr.dwBufferLength = (ULONG)(nBuffer * frameSize);
                 hdr.lpData = (LPSTR)buf;
                 mmresult = waveOutPrepareHeader(hWavOut, &hdr, sizeof(hdr));
 				assert(mmresult == MMSYSERR_NOERROR);
@@ -612,7 +614,7 @@ static void callback(snd_async_handler_t *pcm_callback)
     pthread_cond_signal(&condition);    
 }
 
-void playLoop(Midi *pMidi, float nSeconds, unsigned long samplesPerSecond = 48000)
+void playLoop(Midi *pMidi, float nSeconds, uint32_t  samplesPerSecond = 48000)
 {
     uint32_t channels = 2;
 
