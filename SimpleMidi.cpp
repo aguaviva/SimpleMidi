@@ -8,6 +8,7 @@
 #include <stdlib.h>
 #include <string.h>
 
+#define _countof(a) (sizeof(a)/sizeof(*(a)))
 
 float NoteToFreq(int note)
 {
@@ -515,8 +516,10 @@ void CALLBACK waveOutProc(HWAVEOUT hwo, UINT uMsg, DWORD_PTR dwInstance, DWORD_P
     }
 }
 
-MMRESULT playLoop(Midi *pMidi, float nSeconds, int bufferCount, unsigned long samplesPerSecond = 48000)
+MMRESULT playLoop(Midi *pMidi, float nSeconds, unsigned long samplesPerSecond = 48000)
 {
+    int bufferCount = 2;
+    
     WAVEFORMATEX waveFormat = { 0 };
     waveFormat.cbSize = 0;
     waveFormat.wFormatTag = WAVE_FORMAT_IEEE_FLOAT;
@@ -593,107 +596,111 @@ MMRESULT playLoop(Midi *pMidi, float nSeconds, int bufferCount, unsigned long sa
 #elif __linux__
 
 #include <../alsa/asoundlib.h>
-#define _countof(a) (sizeof(a)/sizeof(*(a)))
+#include <pthread.h>
 
+pthread_cond_t condition;
+pthread_mutex_t signalMutex;
 uint32_t blocksPlayed = 0;
+size_t nBuffer;
 
 static void callback(snd_async_handler_t *pcm_callback)
 {
     snd_pcm_t *handle = snd_async_handler_get_pcm(pcm_callback);
-    snd_pcm_sframes_t pcm_delay;
-
-    // get the number of frames in the soundcard output queue 
-
-    if (snd_pcm_delay(handle,&pcm_delay) < 0)
-	    pcm_delay = 0;
-
-    printf("Queue Frames %lu\n", pcm_delay);
+    snd_pcm_sframes_t pcm_avail = snd_pcm_avail(handle);
+    
     blocksPlayed++;
+    pthread_cond_signal(&condition);    
 }
 
-void playLoop(Midi *pMidi, float nSeconds, int bufferCount, unsigned long samplesPerSecond = 48000)
+void playLoop(Midi *pMidi, float nSeconds, unsigned long samplesPerSecond = 48000)
 {
-        int channels = 2;
+    uint32_t channels = 2;
 
-        const char *device = "default";
-        snd_output_t *output = NULL;
-        
-        int err;
-        snd_pcm_sframes_t frames;        
-        snd_pcm_t *handle;
-        if ((err = snd_pcm_open(&handle, device, SND_PCM_STREAM_PLAYBACK, SND_PCM_ASYNC)) < 0) 
-        {
-            printf("Playback open error: %s\n", snd_strerror(err));
-            exit(EXIT_FAILURE);
-        }
-        
-        if ((err = snd_pcm_set_params(handle,
-                                      SND_PCM_FORMAT_FLOAT_LE,
-                                      SND_PCM_ACCESS_RW_INTERLEAVED,
-                                      2,
-                                      samplesPerSecond,
-                                      0,
-                                      500000 /* 0.5sec */
-                                      )) < 0) 
-        {   
-            printf("Playback open error: %s\n", snd_strerror(err));
-            exit(EXIT_FAILURE);
-        }        
-        
-        snd_pcm_nonblock(handle, 1);
-        
-        snd_async_handler_t *pcm_callback;
-        err = snd_async_add_pcm_handler(&pcm_callback,handle,callback,NULL);	        
-        if (err < 0) 
-        {
-                fprintf(stderr, "unable to add async handler %i (%s)\n", err, snd_strerror(err));
-                exit(EXIT_FAILURE);
-        }        
-        // allocate buffer
-        size_t nBuffer = (size_t)(nSeconds * channels * samplesPerSecond);
-        float *buffer = (float *)calloc(bufferCount * nBuffer, sizeof(*buffer));
-        uint32_t index = 0;
+    pthread_cond_init(&condition, NULL);
+    pthread_mutex_init(&signalMutex, NULL);
 
-        uint32_t blocksRendered = 0;
-        for (;;)
-        {
-            // Pause rendering thread if we are getting too ahead
-            //
-            if (blocksRendered  >= blocksPlayed + bufferCount)
-            {
-                printf("full-----------------------------------------\n");
-                sleep(100000);
-                //WaitForSingleObject(event, INFINITE);                
-            }        
+    const char *device = "plughw:0,0";
+    snd_output_t *output = NULL;
+    
+    int err;       
+    snd_pcm_t *pcm_handle;
+    if ((err = snd_pcm_open(&pcm_handle, device, SND_PCM_STREAM_PLAYBACK, 0)) < 0) 
+    {
+        printf("Playback open error: %s\n", snd_strerror(err));
+        exit(EXIT_FAILURE);
+    }
+    
+    if ((err = snd_pcm_set_params(pcm_handle,
+                                  SND_PCM_FORMAT_FLOAT_LE,
+                                  SND_PCM_ACCESS_RW_INTERLEAVED,
+                                  channels,
+                                  samplesPerSecond,
+                                  0,
+                                  200000
+                                  )) < 0) 
+    {   
+        printf("Playback open error: %s\n", snd_strerror(err));
+        exit(EXIT_FAILURE);
+    }        
+    
+    size_t frameSize = snd_pcm_frames_to_bytes(pcm_handle, 1);
+    printf("framer size %lu\n", frameSize);
         
-            printf("index %i\n", index);
+    snd_pcm_uframes_t buffer_size;
+    snd_pcm_uframes_t period_size;
+    snd_pcm_get_params(	pcm_handle, &buffer_size, &period_size);	        
+    printf("Output buffer and period size %lu, %lu\n", buffer_size, period_size);
+    
         
-            // Render audio
-            //
-            float *buf = &buffer[index * nBuffer];
-            pMidi->RenderMidi(samplesPerSecond, channels, nBuffer, buf);
-            blocksRendered++;
+    snd_async_handler_t *pcm_callback;
+    err = snd_async_add_pcm_handler(&pcm_callback,pcm_handle,callback,NULL);	        
+    if (err < 0) 
+    {
+        fprintf(stderr, "unable to add async handler %i (%s)\n", err, snd_strerror(err));
+        exit(EXIT_FAILURE);
+    } 
+           
 
-            // Play audio
-            {
-                printf("snd_pcm_writei\n");
-                frames = snd_pcm_writei(handle, buf, nBuffer/2);
-                if (frames < 0)
-                        frames = snd_pcm_recover(handle, frames, 0);
-                if (frames < 0) {
-                        printf("snd_pcm_writei failed: %s\n", snd_strerror(err));
-                        break;
-                }
-                if (frames > 0 && frames < (long)sizeof(buffer))
-                        printf("Short write (expected %li, wrote %li)\n", (long)sizeof(buffer), frames);            
-                
-                printf("Frames %lu\n", frames);
-                
-                index = (index + 1) % bufferCount;
+    // allocate buffer
+    float *buffer = (float *)calloc(buffer_size, frameSize);
+    nBuffer = (size_t)(period_size);  
+    uint32_t bufferCount = buffer_size/period_size;
+
+    uint32_t index = 0;
+    uint32_t blocksRendered = 0;
+    for (;;)
+    {        
+        // Render audio
+        //
+        float *buf = &buffer[index * nBuffer];
+        pMidi->RenderMidi(samplesPerSecond, channels, nBuffer*2, buf);
+        blocksRendered++;
+
+        // Play audio
+        {
+            snd_pcm_sframes_t frames = snd_pcm_writei(pcm_handle, buf, nBuffer);
+            if (frames < 0)
+                    frames = snd_pcm_recover(pcm_handle, frames, 0);
+            if (frames < 0) {
+                    printf("snd_pcm_writei failed: %s\n", snd_strerror(err));
+                    break;
             }
+            //if (frames > 0 && frames < (long)sizeof(buffer))
+            //    printf("Short write (expected %li, wrote %li)\n", (long)sizeof(buffer), frames);            
+            
+            index = (index + 1) % bufferCount;
         }
-        
-        snd_pcm_close(handle);
+
+        // Pause rendering thread if we are getting too ahead
+        //
+        if (blocksRendered  >= blocksPlayed + bufferCount)
+        {
+            pthread_cond_wait(&condition, &signalMutex);
+        }   
+             
+    }
+    
+    snd_pcm_close(pcm_handle);
 }
 #endif
 
@@ -706,7 +713,7 @@ int main(int argc, char **argv)
     Midi midi;
 	if (midi.LoadMidi("../Mario-Sheet-Music-Overworld-Main-Theme.mid"))
 	{
-		playLoop(&midi, .1, 2);
+		playLoop(&midi, .1);
 		midi.UnloadMidi();
 	}
     return 0;
