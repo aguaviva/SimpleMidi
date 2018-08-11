@@ -19,13 +19,7 @@ float NoteToFreq(int note)
 
 float playNote(float time, float freq, float vol)
 {
-    float v = (float)(cosf(2.0f * (float)M_PI * time * freq));
-    if (v > 0) 
-        v = vol;
-    else if (v < 0) 
-        v = -vol;
-
-    return v;
+    return (float)tanf(cosf(2.0f * (float)M_PI * time * freq));
 }
 
 void printNote(unsigned char note)
@@ -52,7 +46,7 @@ class Piano
 public:
     Piano()
     {
-        m_noteDuration = 0.3f; // in seconds
+        m_noteDuration = 0.2f; // in seconds
 
         for (int i = 0; i < _countof(m_channel); i++)
             memset(&m_channel[i], 0, sizeof(Channel));
@@ -266,29 +260,22 @@ public:
 
                 printf("    meta: 0x%02x", metaType);
                 printf("    length: 0x%02x", length);
-
-                if (metaType == 0x01)
+                
+                if (metaType >= 0x01 && metaType <= 0x05)
                 {
-                    printf("    text event: ");
-                    for (int i = 0; i<length; i++)
-                        printf("%c", GetByte());
-                }
-                else if (metaType == 0x03)
-                {
-                    printf("    track name: ");
-                    for (int i = 0; i<length; i++)
-                        printf("%c", GetByte());
-                }
-                else if (metaType == 0x09)
-                {
-                    printf("    inst: ");
+                    char *ChunkType[] = { "text event", "copyright", "track name", "instrument", "lyrics" };
+                    printf("    %s: ", ChunkType[metaType-1]);
                     for (int i = 0; i<length; i++)
                         printf("%c", GetByte());
                 }
                 else if (metaType == 0x20)
                 {
-                    m_channel = GetByte();                    
+                    m_channel = (m_channel & 0xFF00) | GetByte();                   
                 }
+                else if (metaType == 0x21)
+                {
+                    m_channel = (m_channel & 0xFF) | GetByte() << 8;
+                 }                
                 else if (metaType == 0x51)
                 {
                     uint32_t tempo = GetLength(3);
@@ -352,18 +339,15 @@ public:
                     unsigned char key = GetByte();
                     unsigned char speed = GetByte();
 
-                    int i;
-
                     if (subType == 8)
                     {
-                        i = piano.release(seconds, m_omni ? channel : -1, key, speed);
+                        piano.release(seconds, m_omni ? channel : -1, key, speed);
                     }
                     else if (subType == 9)
                     {
-                        i = piano.push(seconds, m_omni ? channel : -1, key, speed);
+                        piano.push(seconds, m_omni ? channel : -1, key, speed);
                     }
 
-                    //'printf("    ac: %c ch: %i note: ", channel + 0*(subType == 8) ?'^':'v', i);
                     printf("    ac: %c ch: %i note: ", (subType == 8) ? '^' : 'v', channel);
                     printNote(key);
                 }
@@ -736,8 +720,14 @@ void playLoop(Midi *pMidi, float nSeconds, uint32_t  samplesPerSecond = 48000)
 
 int main(int argc, char **argv)
 {
+    const char *file = "../Mario-Sheet-Music-Overworld-Main-Theme.mid";
+    if (argc > 1) 
+    {
+       file = argv[1];
+    }
+
     Midi midi;
-    if (midi.LoadMidi("../Mario-Sheet-Music-Overworld-Main-Theme.mid"))
+    if (midi.LoadMidi(file))
     {
         playLoop(&midi, .1f);
         midi.UnloadMidi();
