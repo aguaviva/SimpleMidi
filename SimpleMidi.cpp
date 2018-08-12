@@ -17,11 +17,6 @@ float NoteToFreq(int note)
     return (float)pow(2.0f, (note - 49) / 12.0f) * 440.0f;
 }
 
-float playNote(float time, float freq, float vol)
-{
-    return (float)tanf(cosf(2.0f * (float)M_PI * time * freq));
-}
-
 void printNote(unsigned char note)
 {
     const char *notes[] = { "C", "C#", "D", "D#", "E", "F", "F#", "G", "G#", "A", "A#", "B" };
@@ -35,9 +30,22 @@ class Piano
 {
     struct Channel
     {
-        float time;
-        uint32_t velocity;
-        unsigned char note;
+        float m_time;
+        uint32_t m_velocity;
+        uint32_t m_freq;
+        unsigned char m_note;
+
+        bool m_square = false;
+        float playSquareWave(float time, float vol)
+        {
+            while (m_time < time)
+            {
+                m_time += 1.0 / m_freq;
+                m_square = !m_square;
+            }
+
+            return m_square ? vol : -vol;
+        }
     };
 
     Channel m_channel[20];
@@ -46,7 +54,7 @@ class Piano
 public:
     Piano()
     {
-        m_noteDuration = 0.2f; // in seconds
+        m_noteDuration = 0.3f; // in seconds
 
         for (int i = 0; i < _countof(m_channel); i++)
             memset(&m_channel[i], 0, sizeof(Channel));
@@ -58,7 +66,7 @@ public:
         {
             for (int i = 0; i < _countof(m_channel); i++)
             {
-                if (m_channel[i].note == note)
+                if (m_channel[i].m_note == note)
                 {
                     channelId = i;
                     break;
@@ -68,9 +76,9 @@ public:
 
         if (channelId >=0)
         {
-            m_channel[channelId].note = 0;
-            m_channel[channelId].velocity = velocity;
-            m_channel[channelId].time = t;
+            m_channel[channelId].m_note = 0;
+            m_channel[channelId].m_velocity = velocity;
+            m_channel[channelId].m_time = t;
         }
 
         return channelId;
@@ -82,7 +90,7 @@ public:
         {
             for (int i = 0; i < _countof(m_channel); i++)
             {
-                if (m_channel[i].note == 0)
+                if (m_channel[i].m_note == 0)
                 {
                     channelId = i;
                     break;
@@ -92,9 +100,11 @@ public:
 
         if (channelId >= 0)
         {
-            m_channel[channelId].note = note;
-            m_channel[channelId].velocity = velocity;
-            m_channel[channelId].time = t;
+            m_channel[channelId].m_note = note;
+            m_channel[channelId].m_velocity = velocity;
+            m_channel[channelId].m_time = t;
+
+            m_channel[channelId].m_freq = NoteToFreq(note);
         }
 
         return channelId;
@@ -102,24 +112,25 @@ public:
 
     float synthesize(float time)
     {
-        float val = 0;
+        float out = 0;
         
         for (int i = 0; i < _countof(m_channel); i++)
         {
-            if (m_channel[i].note > 0)
+            if (m_channel[i].m_note > 0)
             {
-                float vol = ((m_channel[i].time + m_noteDuration) - time) / m_noteDuration;
+                // volume decay
+                float vol = ((m_channel[i].m_time + m_noteDuration) - time) / m_noteDuration;
 
                 if (vol > 0)
-                    val += playNote(time, NoteToFreq(m_channel[i].note), vol);
+                    out += m_channel[i].playSquareWave(time, vol);
                 else
-                    m_channel[i].note = 0;
+                    m_channel[i].m_note = 0;
             }
         }
 
-        val /= _countof(m_channel);
+        out /= _countof(m_channel);
 
-        return val;
+        return out;
     }
 
     float printKeyboard()
@@ -130,8 +141,8 @@ public:
         keyboard[128] = 0;
 
         for (int t = 0; t < _countof(m_channel); t++)
-            if (m_channel[t].note > 0)
-                keyboard[m_channel[t].note] = '#';
+            if (m_channel[t].m_note > 0)
+                keyboard[m_channel[t].m_note] = '#';
 
         printf("%s\n", keyboard);
     }
@@ -208,10 +219,9 @@ public:
 ///////////////////////////////////////////////////////////////
 // MidiTrack
 ///////////////////////////////////////////////////////////////
-
-uint32_t ticksPerQuarterNote=24;
+uint32_t ticksPerQuarterNote;  //or ticks per beat
 float quarterNote = 24;
-uint32_t bpm = 120;
+static uint32_t beatsPerSecond = 120;
 
 class MidiTrack : public MidiStream
 {
@@ -279,8 +289,8 @@ public:
                 else if (metaType == 0x51)
                 {
                     uint32_t tempo = GetLength(3);
-                    bpm =  60 * 1000000 / tempo;
-                    printf("    tempo: %i bpm", bpm);
+                    beatsPerSecond =  1000000 / tempo;
+                    printf("    tempo: %i bpm", beatsPerSecond * 60);
                 }
                 else if (metaType == 0x54)
                 {
@@ -398,7 +408,7 @@ public:
             if (done())
                 break;
 
-            float c = (float)(bpm * ticksPerQuarterNote) / 60.0f;
+            float c = (float)(beatsPerSecond * ticksPerQuarterNote);
 
             uint32_t deltaTicks = GetVar();
             if (c >0)
@@ -421,7 +431,7 @@ class Midi
     unsigned char *midi;
 
 public:
-    void RenderMidi(uint32_t sampleRate, uint32_t channels, size_t size, float *pOut)
+    void RenderMidi(const uint32_t sampleRate, const uint32_t channels, const size_t size, float *pOut)
     {
         for (uint32_t i = 0; i < size; i++)
         {
@@ -721,7 +731,7 @@ void playLoop(Midi *pMidi, float nSeconds, uint32_t  samplesPerSecond = 48000)
 int main(int argc, char **argv)
 {
     const char *file = "../Mario-Sheet-Music-Overworld-Main-Theme.mid";
-    if (argc > 1) 
+    if (argc > 1)
     {
        file = argv[1];
     }
