@@ -32,7 +32,7 @@ class Piano
     {
         float m_time;
         uint32_t m_velocity;
-        uint32_t m_freq;
+        uint32_t m_period;
         unsigned char m_note;
 
         bool m_square = false;
@@ -40,7 +40,7 @@ class Piano
         {
             while (m_time < time)
             {
-                m_time += 1.0 / m_freq;
+                m_time += m_period;
                 m_square = !m_square;
             }
 
@@ -54,7 +54,7 @@ class Piano
 public:
     Piano()
     {
-        m_noteDuration = 0.3f; // in seconds
+        m_noteDuration = 0.3f * 1000000; // in microseconds
 
         for (int i = 0; i < _countof(m_channel); i++)
             memset(&m_channel[i], 0, sizeof(Channel));
@@ -104,7 +104,7 @@ public:
             m_channel[channelId].m_velocity = velocity;
             m_channel[channelId].m_time = t;
 
-            m_channel[channelId].m_freq = NoteToFreq(note);
+            m_channel[channelId].m_period = 1000000.0f / NoteToFreq(note);
         }
 
         return channelId;
@@ -221,7 +221,7 @@ public:
 ///////////////////////////////////////////////////////////////
 uint32_t ticksPerQuarterNote;  //or ticks per beat
 float quarterNote = 24;
-static uint32_t beatsPerSecond = 120;
+uint32_t microSecondsPerMidiTick;
 
 class MidiTrack : public MidiStream
 {
@@ -238,9 +238,9 @@ public:
         m_omni = false;
     }
 
-    void play(float seconds)
+    void play(uint32_t microSeconds)
     {
-        while (m_nextTime <= seconds)
+        while (m_nextTime <= microSeconds)
         {
             if (done() == true)
             {
@@ -289,8 +289,10 @@ public:
                 else if (metaType == 0x51)
                 {
                     uint32_t tempo = GetLength(3);
-                    beatsPerSecond =  1000000 / tempo;
+                    uint32_t beatsPerSecond =  1000000 / tempo;
                     printf("    tempo: %i bpm", beatsPerSecond * 60);
+
+                    microSecondsPerMidiTick = tempo / ticksPerQuarterNote;
                 }
                 else if (metaType == 0x54)
                 {
@@ -351,11 +353,11 @@ public:
 
                     if (subType == 8)
                     {
-                        piano.release(seconds, m_omni ? channel : -1, key, speed);
+                        piano.release(microSeconds, m_omni ? channel : -1, key, speed);
                     }
                     else if (subType == 9)
                     {
-                        piano.push(seconds, m_omni ? channel : -1, key, speed);
+                        piano.push(microSeconds, m_omni ? channel : -1, key, speed);
                     }
 
                     printf("    ac: %c ch: %i note: ", (subType == 8) ? '^' : 'v', channel);
@@ -408,11 +410,8 @@ public:
             if (done())
                 break;
 
-            float c = (float)(beatsPerSecond * ticksPerQuarterNote);
-
             uint32_t deltaTicks = GetVar();
-            if (c >0)
-                m_nextTime += deltaTicks / c;
+            m_nextTime += (deltaTicks * microSecondsPerMidiTick);
         }
     }
 };
@@ -423,7 +422,7 @@ public:
 
 class Midi
 {
-    float time;
+    uint32_t time;
 
     MidiTrack *pTrack[50];
     uint32_t tracks;
@@ -442,7 +441,7 @@ public:
 
             float val = piano.synthesize(time);
 
-            time += 1.0f / sampleRate;
+            time += 1000000.0f / sampleRate;
 
             for (unsigned short j = 0; j < channels; j++)
             {
