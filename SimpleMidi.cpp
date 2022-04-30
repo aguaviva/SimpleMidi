@@ -8,6 +8,10 @@
 #include <stdlib.h>
 #include <string.h>
 
+#define SYNTH_BASICSYNTH
+//#define SYNTH_DX7
+//#define SYNTH_MT32EMU
+
 #ifndef _countof
 #define _countof(a) (sizeof(a)/sizeof(*(a)))
 #endif
@@ -40,6 +44,11 @@ float NoteToFreq(int note)
     return (float)pow(2.0f, (note - 69) / 12.0f) * 440.0f;
 }
 
+float NoteToFreqFrac(float note)
+{
+    return (float)pow(2.0f, (note - 69) / 12.0f) * 440.0f;
+}
+
 void printNote(unsigned char note)
 {
     const char *notes[] = { "C ", "C#", "D ", "D#", "E ", "F ", "F#", "G ", "G#", "A ", "A#", "B " };
@@ -57,12 +66,14 @@ public:
     virtual void printKeyboard() = 0;
 };
 
+#ifdef SYNTH_BASICSYNTH
 class Piano : public Instrument
 {
     bool m_omni = false;
     uint32_t m_time;
     struct Channel
     {
+        bool m_pressed = false;
         uint32_t m_time=0;
         uint32_t m_velocity = 0;
         uint32_t m_period = 0;
@@ -81,6 +92,37 @@ class Piano : public Instrument
 
             return m_square ? vol : -vol;
         }
+
+        float render(uint32_t time)
+        {
+            if (m_note > 0)
+            {
+                if (m_pressed)
+                {
+                    return playSquareWave(time, m_velocity);
+                }
+                else
+                {
+                    uint32_t timeSinceReleased = time - m_time;
+                    //uint32_t noteDuration = m_velocity * 1000000;
+                    uint32_t noteDuration = 100000;
+
+                    if (timeSinceReleased < noteDuration)
+                    {
+                        float t = (float)timeSinceReleased / (float)noteDuration;
+                        float vol = 1.0f - t;
+
+                        return playSquareWave(time, m_velocity * vol);
+                    }
+                    else
+                    {
+                        m_note = 0;
+                    }
+                }
+            }
+
+            return 0;
+        }
     };
 
     Channel m_channel[20];
@@ -91,8 +133,6 @@ public:
     Piano(uint32_t sample_rate)
     {
         m_sample_rate = sample_rate;
-
-        m_noteDuration = (uint32_t)(0.3f * 1000000); // in microseconds
 
         for (int i = 0; i < _countof(m_channel); i++)
             memset(&m_channel[i], 0, sizeof(Channel));
@@ -114,11 +154,13 @@ public:
             }
         }
 
+        //assert(channelId >= 0);
+
         if (channelId >=0)
         {
-            m_channel[channelId].m_note = 0;
+            m_channel[channelId].m_pressed = false;
+            m_channel[channelId].m_time = m_time;
             m_channel[channelId].m_velocity = velocity;
-            m_channel[channelId].m_time = 0;
         }
 
         return channelId;
@@ -130,7 +172,7 @@ public:
         {
             for (int i = 0; i < _countof(m_channel); i++)
             {
-                if (m_channel[i].m_note == 0)
+                if (m_channel[i].m_note == note)
                 {
                     channelId = i;
                     break;
@@ -138,13 +180,27 @@ public:
             }
         }
 
+        if (channelId == -1)
+        {
+            for (int i = 0; i < _countof(m_channel); i++)
+            {
+                if (m_channel[i].m_note == 0)
+                {
+                    channelId = i;
+                    break;
+                }
+            }
+        }
+        
+        assert(channelId >= 0);
+
         if (channelId >= 0)
         {
+            m_channel[channelId].m_pressed = true;
             m_channel[channelId].m_note = note;
             m_channel[channelId].m_velocity = velocity;
             m_channel[channelId].m_time = m_time;
             m_channel[channelId].m_phase = m_time;
-
             m_channel[channelId].m_period = (uint32_t)(1000000.0f / NoteToFreq(note))/2;
         }
 
@@ -157,23 +213,7 @@ public:
         
         for (int i = 0; i < _countof(m_channel); i++) 
         {
-            if (m_channel[i].m_note > 0)
-            { 
-                // volume decay
-                uint32_t timeSincePressed = m_time - m_channel[i].m_time;
-
-                if (timeSincePressed < m_noteDuration)
-                {
-                    float t = (float)timeSincePressed / (float)m_noteDuration;
-                    float vol = 1.0f-t;
-
-                    out += m_channel[i].playSquareWave(m_time, vol);
-                }
-                else
-                {
-                    m_channel[i].m_note = 0;
-                }
-            }
+            out += m_channel[i].render(m_time);
         }
 
         out /= _countof(m_channel);
@@ -219,6 +259,20 @@ public:
                 m_omni = true;
             }
         }
+        else if (subType == 0xE) //pitch wheel
+        {
+            int32_t pitch_wheel = ((pdata[1] & 0x7f) | ((pdata[2] & 0x7f) << 7)) - 8192;
+            float t = (float)(pitch_wheel) / (8192.0);
+            int32_t note = m_channel[channel].m_note;
+            float freq = NoteToFreqFrac((float)note + 10.0 * t);
+
+            m_channel[channel].m_period = (uint32_t)(1000000.0f / freq) / 2;
+
+            //m_channel[channel].m_note += pitch_bend;
+            printf("pitch bend %i: %i\n", channel, pitch_wheel);
+            return;
+
+        }
     }
 
     void render_samples(int n_samples, float* pOut)
@@ -249,9 +303,67 @@ public:
         printf("%s\n", keyboard);
     }
 };
+Piano piano(48000);
+#endif
 
-#if 0
+#ifdef SYNTH_MT32EMU
+//#define MT32EMU_API_TYPE 3
+#include "mt32emu.h"
 
+
+class MT32EMU : public Instrument, public MT32Emu::ReportHandler
+{
+    //mt32emu_service_i service;
+    MT32Emu::Synth* m_pSynth;
+public:
+    MT32EMU(int32_t sample_rate)
+    {       
+        MT32Emu::FileStream romFile1;
+        romFile1.open("../roms/mt32/ctrl_mt32_2_04.rom");
+        const MT32Emu::ROMImage* pControlROMImage = MT32Emu::ROMImage::makeROMImage(&romFile1);
+
+        MT32Emu::FileStream romFile2;
+        romFile2.open("../roms/mt32/pcm_mt32.rom");
+        const MT32Emu::ROMImage* pPCMROMImage = MT32Emu::ROMImage::makeROMImage(&romFile2);
+        
+        m_pSynth = new MT32Emu::Synth(this);
+        if (m_pSynth->open(*pControlROMImage, *pPCMROMImage))
+        {
+            int sampleRate = m_pSynth->getStereoOutputSampleRate();
+            m_pSynth->setOutputGain(1);
+            m_pSynth->setReverbOutputGain(0);
+            m_pSynth->setMIDIDelayMode(MT32Emu::MIDIDelayMode_IMMEDIATE);
+            m_pSynth->selectRendererType(MT32Emu::RendererType_FLOAT);
+            const MT32Emu::Bit8u StandardMIDIChannelsSysEx[] = { 0x10, 0x00, 0x0D, 0x01, 0x02, 0x03, 0x04, 0x05, 0x06, 0x07, 0x08, 0x09 };
+            m_pSynth->writeSysex(0x10, StandardMIDIChannelsSysEx, sizeof(StandardMIDIChannelsSysEx));
+            
+        }
+
+        //mt32emu_set_actual_stereo_output_samplerate(context);
+    }
+
+    void send_midi(uint8_t* pdata, size_t size)
+    {
+        uint8_t data[4] = { pdata[0]|1, pdata[1], pdata[2],0 };
+        MT32Emu::Bit32u d = *((MT32Emu::Bit32u*)data);
+        m_pSynth->playMsg(d);
+    }
+
+    void render_samples(int n_samples, float* pOut)
+    {
+        m_pSynth->render(pOut, n_samples);
+    }
+
+    void printKeyboard()
+    {
+        printf("\n");
+    }
+};
+
+MT32EMU piano(48000);
+#endif
+
+#ifdef SYNTH_DX7
 void dx7_start(int sample_rate, size_t buf_size);
 void dx7_render(int n_samples, int16_t* buffer);
 void dx7_send_midi(unsigned char* pData, size_t size);
@@ -268,7 +380,7 @@ public:
         load_file("../rom1a.syx", &pBank_buffer, &bank_size);
         dx7_send_midi(pBank_buffer, bank_size);
 
-        unsigned char data[2] = { 0xc0 , 10 };
+        unsigned char data[2] = { 0xc0 , 0 };
         dx7_send_midi(data, 2);
     }
 
@@ -300,8 +412,6 @@ public:
 
 };
 DX7 piano(48000);
-#else
-Piano piano(48000);
 #endif
 
 ///////////////////////////////////////////////////////////////
@@ -365,8 +475,7 @@ public:
 
     bool done()
     {
-        uint64_t left = m_pTrackFin - m_pTrack;
-        return left <= 0;
+        return m_pTrack >= m_pTrackFin;
     }
 };
 
@@ -379,10 +488,12 @@ uint32_t microSecondsPerMidiTick;
 
 class MidiTrack : public MidiStream
 {
-    uint32_t m_nextTime;
+    uint64_t m_nextTime;
     uint32_t m_channel;
     unsigned char m_lastType;
-
+    char* m_TrackName;
+    char* m_InstrumentName;
+    uint8_t m_status;
     uint32_t m_timesignatureNum = 4;
     uint32_t m_timesignatureDen = 4;
 
@@ -393,6 +504,7 @@ public:
         m_nextTime = GetVar();
         m_channel = -1;
         m_lastType = 0;
+        m_TrackName = "none";
     }
 
     uint32_t play(uint32_t microSeconds)
@@ -403,165 +515,183 @@ public:
 
         // are we done with the stream?
         if (done() == true)
-            return m_nextTime;
+            return 0xffffffff;
 
         //process all events for this instant and compute m_nextTime
         for (;;)
         {
-            unsigned char type = GetByte();            
-            if ((type & 0x80) == 0)
+            if ((*m_pTrack & 0x80) > 0)
             {
-                Back();
-                type = m_lastType;
-            }
-            else
-            {                    
-                m_lastType = type;
+                m_status = GetByte();
             }
 
-            //printf("%i:  0x%02x ", m_channel, type);
-
-            if (type == 0xff)
+            //printf("%s:  0x%02x ", m_TrackName, type);
+            if (m_status >= 0xf0)
             {
-                unsigned char metaType = GetByte();
-                unsigned char length = GetByte();
-
-                //printf("    meta: 0x%02x", metaType);
-                //printf("    length: 0x%02x", length);
-                
-                if (metaType >= 0x01 && metaType <= 0x05)
+                if (m_status == 0xff)
                 {
-                    char *ChunkType[] = { "text event", "copyright", "track name", "instrument", "lyrics" };
-                    printf("    %s: ", ChunkType[metaType-1]);
-                    for (int i = 0; i<length; i++)
-                        printf("%c", GetByte());
+                    unsigned char metaType = GetByte();
+                    unsigned char length = GetByte();
+
+                    //printf("    meta: 0x%02x", metaType);
+                    //printf("    length: 0x%02x", length);
+
+                    if (metaType >= 0x01 && metaType <= 0x05)
+                    {
+                        char* ChunkType[] = { "text event", "copyright", "track name", "instrument", "lyrics" };
+
+                        if (metaType == 3)
+                        {
+                            m_TrackName = (char*)m_pTrack;
+                        }
+                        else if (metaType == 4)
+                        {
+                            m_InstrumentName = (char*)m_pTrack;
+                        }
+
+                        printf("    %s: ", ChunkType[metaType - 1]);
+                        for (int i = 0; i < length; i++)
+                            printf("%c", GetByte());
+                        printf("\n");
+                    }
+                    else if (metaType == 0x09)
+                    {
+                        printf("Device_name: ");
+
+                        for (int i = 0; i < length; i++)
+                            printf("%c", GetByte());
+                        printf("\n");
+                    }
+                    else if (metaType == 0x20)
+                    {
+                        m_channel = (m_channel & 0xFF00) | GetByte();
+                        printf("m_channel %i", m_channel);
+                    }
+                    else if (metaType == 0x21)
+                    {
+                        m_channel = (m_channel & 0xFF) | GetByte() << 8;
+                    }
+                    else if (metaType == 0x51)
+                    {
+                        uint32_t microseconds_per_quarter = GetLength(3);
+                        uint32_t beatsPerSecond = 1000000 / microseconds_per_quarter;
+                        //printf("    tempo: %i bpm/QNPM", beatsPerSecond * 60);
+
+                        microSecondsPerMidiTick = (microseconds_per_quarter / ticksPerQuarterNote);
+                    }
+                    else if (metaType == 0x54)
+                    {
+                        unsigned char hr = GetByte();
+                        unsigned char mn = GetByte();
+                        unsigned char se = GetByte();
+                        unsigned char fr = GetByte();
+                        unsigned char ff = GetByte();
+                        printf("SMPTE Offset %i:%i:%i  %i,%i\n", hr, mn, se, fr, ff);
+                    }
+                    else if (metaType == 0x58)
+                    {
+                        m_timesignatureNum = GetByte();
+                        m_timesignatureDen = 1 << GetByte();
+                        unsigned char cc = GetByte();  // midi clocks in a metronome click
+                        unsigned char bb = GetByte();  // 
+
+                        quarterNote = 100000.0f / (float)cc;
+
+                        //printf("    time sig: %i/%i MIDI clocks per quarter-dotted %i", m_timesignatureNum, m_timesignatureDen, cc);
+                    }
+                    else if (metaType == 0x59)
+                    {
+                        unsigned char sf = GetByte();
+                        unsigned char mi = GetByte();
+
+                        //printf("    sf: %i mi: %i", sf, mi);
+                    }
+                    else if (metaType == 0x2F)
+                    {
+                        //unsigned char nn = GetByte();
+                        printf("************ THE END ************\n");
+                    }
+                    else if (metaType == 0x7f)
+                    {
+                        printf(" sequencer specific");
+                        for (int i = 0; i < length; i++)
+                            printf("%02x ", GetByte());
+                        printf("\n");
+                    }
+                    else
+                    {
+                        printf(" ch %i   unknown metaType: 0x%02x, length %i\n", m_channel, metaType, length);
+                        Skip(length);
+                    }
+                }
+                else if (m_status == 0xf0)
+                {
+                    printf("System exclusive: ");
+                    for (;;)
+                    {
+                        unsigned char c = GetByte();
+                        if (c == 0xf7)
+                            break;
+                        printf("%02x ", c);
+                    }
                     printf("\n");
                 }
-                else if (metaType == 0x09)
+                else if (m_status == 0xf7)
                 {
-                    printf("Device_name: ");
-                    
-                    for (int i = 0; i < length; i++)
-                        printf("%c", GetByte());
-                    printf("\n");
+                    unsigned char length = GetByte();
+                    Skip(length);
                 }
-                else if (metaType == 0x20)
+                else if (m_status == 0xfd)
                 {
-                    m_channel = (m_channel & 0xFF00) | GetByte();                   
-                    printf("m_channel %i", m_channel);
-                }
-                else if (metaType == 0x21)
-                {
-                    m_channel = (m_channel & 0xFF) | GetByte() << 8;
-                 }                
-                else if (metaType == 0x51)
-                {
-                    uint32_t microseconds_per_quarter = GetLength(3);
-                    uint32_t beatsPerSecond =  1000000 / microseconds_per_quarter;
-                    //printf("    tempo: %i bpm/QNPM", beatsPerSecond * 60);
-                    
-                    microSecondsPerMidiTick = (microseconds_per_quarter / ticksPerQuarterNote);
-                }
-                else if (metaType == 0x54)
-                {
-                    unsigned char hr = GetByte();
-                    unsigned char mn = GetByte();
-                    unsigned char se = GetByte();
-                    unsigned char fr = GetByte();
-                    unsigned char ff = GetByte();
-                    printf("SMPTE Offset %i:%i:%i  %i,%i\n", hr, mn, se, fr, ff);
-                }
-                else if (metaType == 0x58)
-                {
-                    m_timesignatureNum = GetByte();
-                    m_timesignatureDen = 1<< GetByte();
-                    unsigned char cc = GetByte();  // midi clocks in a metronome click
-                    unsigned char bb = GetByte();  // 
-                    
-                    quarterNote = 100000.0f / (float)cc;
-
-                    //printf("    time sig: %i/%i MIDI clocks per quarter-dotted %i", m_timesignatureNum, m_timesignatureDen, cc);
-                }
-                else if (metaType == 0x59)
-                {
-                    unsigned char sf = GetByte();
-                    unsigned char mi = GetByte();
-
-                    //printf("    sf: %i mi: %i", sf, mi);
-                }
-                else if (metaType == 0x2F)
-                {
-                    unsigned char nn = GetByte();
-                    printf("************ THE END ************\n");
+                    GetByte();
+                    GetByte();
                 }
                 else
                 {
-                    printf(" ch %i   unknown metaType: 0x%02x, length %i\n", m_channel, metaType, length);
-                    Skip(length);
+
                 }
-            }
-            else if (type == 0xf0)
-            {
-                printf("System exclusive: ");
-                for(;;)
-                {
-                    unsigned char c = GetByte();
-                    if (c == 0xf7)
-                        break;
-                    printf("%02x ", c);
-                }
-                printf("\n");
-            }
-            else if (type == 0xf7)
-            {
-                unsigned char length = GetByte();
-                Skip(length);
-            }
-            else if (type == 0xfd)
-            {
-                GetByte();
-                GetByte();
             }
             else
             {
-                unsigned char subType = type >> 4;
-                unsigned char channel = type & 0xf;
+                unsigned char subType = m_status >> 4;
+                unsigned char channel = m_status & 0xf;
                 if (subType >= 0x8 && subType <= 0xB)
-                {                    
+                {
                     unsigned char key = GetByte();
                     unsigned char speed = GetByte();
 
-                    uint8_t data[3] = { type , key, speed };
+                    uint8_t data[3] = { m_status , key, speed };
                     piano.send_midi(data, 3);
                 }
                 else if (subType == 0xC || subType == 0xD) // channel pressure
                 {
                     unsigned char cc = GetByte();
 
-                    uint8_t data[2] = { type , cc};
+                    uint8_t data[2] = { m_status , cc };
                     piano.send_midi(data, 2);
                 }
-                else if (subType == 0xE ) 
+                else if (subType == 0xE)
                 {
                     unsigned char cc = GetByte();
+                    unsigned char dd = GetByte();
 
-                    uint8_t data[2] = { type , cc };
-                    piano.send_midi(data, 2);
+                    uint8_t data[3] = { m_status , cc, dd };
+                    piano.send_midi(data, 3);
                 }
                 else
                 {
-                    printf("    unknown type: 0x%02x", type);
+                    printf("    unknown type: 0x%02x", m_status);
                     assert(0);
                 }
-            }            
+            }
 
             if (done())
                 break;
 
-            uint32_t deltaMidiTicks = GetVar();                       
+            uint32_t deltaMidiTicks = GetVar();
             if (deltaMidiTicks > 0)
             {
-                m_nextTime += (deltaMidiTicks * microSecondsPerMidiTick);
+                m_nextTime += deltaMidiTicks;
                 break;
             }
         }
@@ -576,51 +706,64 @@ public:
 
 class Midi
 {
-    uint32_t time;
+    uint32_t m_time;
 
     MidiTrack *pTrack[50];
-    uint32_t tracks;
+    uint32_t m_tracks;
+    uint32_t m_nextEventTime;
 
-    uint32_t m_nextEventTime = 0;
+    uint32_t m_samples_to_render;
 public:
+    Midi()
+    {
+        m_time = 0;
+        m_tracks = 0;
+        m_nextEventTime = 0;
+        m_samples_to_render = 0;
+    }
+
     bool RenderMidi(const uint32_t sampleRate, const uint32_t channels, size_t size, float *pOut)
     {
         while (size>0)
         {
-            // process event and compute when the next event is
-            if (m_nextEventTime <= time)
+            if (m_samples_to_render == 0)
             {
-                m_nextEventTime = 1000000000;
-                for (uint32_t t = 0; t < tracks; t++)
+                m_nextEventTime = 0xffffffff;
+                for (uint32_t t = 0; t < m_tracks; t++)
                 {
-                    uint32_t next = pTrack[t]->play(time);
+                    uint32_t next = pTrack[t]->play(m_time);
                     if (next > 0)
+                    {
                         m_nextEventTime = MIN(next, m_nextEventTime);
+                    }
                 }
 
-                printf("%9i - %9i [%9i]", time, m_nextEventTime, microSecondsPerMidiTick);
+                if (m_nextEventTime == 0xffffffff)
+                    return false;
+
+                printf("%6i - %6i [%5i]", m_time, m_nextEventTime, microSecondsPerMidiTick);
                 piano.printKeyboard();
+
+                uint64_t event_time = (uint64_t)(m_nextEventTime - m_time) * microSecondsPerMidiTick;
+                m_time = m_nextEventTime;
+
+                m_samples_to_render = ((uint64_t)sampleRate * event_time) / 1000000;
             }
 
-            // render chunk!
-            if (time < m_nextEventTime)
+            //if (m_time>98000 )
+            if (true)
             {
-                uint64_t event_time = (m_nextEventTime - time);
-                uint64_t n_samples = ((uint64_t)sampleRate * event_time) / 1000000;
-
-                if (n_samples > size)
-                {
-                    n_samples = size;
-                    event_time = (uint64_t)(((uint64_t)1000000 * (uint64_t)n_samples) / sampleRate);
-                }
-
-                piano.render_samples(n_samples, pOut);
-                pOut += n_samples* 2;
-
-                time += event_time;
+                int n_samples = MIN(size, m_samples_to_render);
+                piano.render_samples((int)n_samples, pOut);
+                pOut += n_samples * 2;
                 size -= n_samples;
-            }
 
+                m_samples_to_render -= n_samples;
+            }
+            else
+            {
+                m_samples_to_render = 0;
+            }
         }
 
         return true;
@@ -645,19 +788,19 @@ public:
             printf("format %i, tracks %i, ticksPerQuarterNote %i\n", format, tracks, ticksPerQuarterNote);
         }
 
-        tracks = 0;
+        m_tracks = 0;
         while (ch.done() == false)
         {
             if (ch.GetByte() == 'M' && ch.GetByte() == 'T' && ch.GetByte() == 'r' && ch.GetByte() == 'k')
             {
                 int length = ch.GetLength(4);
-                pTrack[tracks] = new MidiTrack(ch.m_pTrack, ch.m_pTrack + length);
+                pTrack[m_tracks] = new MidiTrack(ch.m_pTrack, ch.m_pTrack + length);
                 ch.Skip(length);
-                tracks++;
+                m_tracks++;
             }
         }
 
-        time = 0;
+        m_time = 0;
 
         return true;
     }
@@ -716,20 +859,18 @@ MMRESULT playLoop(Midi *pMidi, float nSeconds, uint32_t samplesPerSecond = 48000
 
         // allocate buffer
         //
-        uint32_t frameSize = channels * sizeof(float);
+        uint32_t frameSize = (uint32_t)(channels * sizeof(float));
         uint32_t nBuffer = (uint32_t)(nSeconds * samplesPerSecond);        
         uint32_t index = 0;
 
         WAVEHDR buf_hdr[bufferCount];
         for (int i = 0; i < bufferCount; i++)
         {
-            WAVEHDR hdr = { 0 };
-            hdr.dwBufferLength = (ULONG)(nBuffer * frameSize);
-            hdr.lpData = (LPSTR)malloc(nBuffer * frameSize);
-            mmresult = waveOutPrepareHeader(hWavOut, &hdr, sizeof(hdr));
+            buf_hdr[i] = { 0 };
+            buf_hdr[i].dwBufferLength = (ULONG)(nBuffer * frameSize);
+            buf_hdr[i].lpData = (LPSTR)malloc(nBuffer * frameSize);
+            mmresult = waveOutPrepareHeader(hWavOut, &buf_hdr[i], sizeof(buf_hdr[0]));
             assert(mmresult == MMSYSERR_NOERROR);
-
-            buf_hdr[i] = hdr;
         }
 
         uint32_t blocksRendered = 0;
@@ -742,7 +883,8 @@ MMRESULT playLoop(Midi *pMidi, float nSeconds, uint32_t samplesPerSecond = 48000
             //
             while (buffers_queued < bufferCount)
             {
-                pMidi->RenderMidi(waveFormat.nSamplesPerSec, waveFormat.nChannels, buf_hdr[index].dwBufferLength / frameSize, (float*)buf_hdr[index].lpData);
+                if (pMidi->RenderMidi(waveFormat.nSamplesPerSec, waveFormat.nChannels, buf_hdr[index].dwBufferLength / frameSize, (float*)buf_hdr[index].lpData) == false)
+                    break;
                 mmresult = waveOutWrite(hWavOut, &buf_hdr[index], sizeof(buf_hdr[0]));
                 assert(mmresult == MMSYSERR_NOERROR);
 
@@ -851,7 +993,8 @@ void playLoop(Midi *pMidi, float nSeconds, uint32_t  samplesPerSecond = 48000)
         // Render audio
         //
         float *buf = &buffer[index * nBuffer];
-        pMidi->RenderMidi(samplesPerSecond, channels, nBuffer, buf);
+        if (pMidi->RenderMidi(samplesPerSecond, channels, nBuffer, buf) == false)
+            break;
         blocksRendered++;
 
         // Play audio
@@ -891,7 +1034,14 @@ int main(int argc, char **argv)
     //const char* filename = "../32175_Yie-Ar-KungFu.mid";
     //const char* filename = "../slowman.mid";
     //const char *filename = "../AroundTheWorld.mid";
-    //const char *filename = "../test1.mid";
+    //const char *filename = "../Tetris - Tetris Main Theme.mid";
+    //const char* filename = "../darude-sandstorm.mid";
+    //const char* filename = "../Never-Gonna-Give-You-Up-3.mid";
+    //const char *filename = "../stage-1.mid";
+    //const char *filename = "../doom.mid";
+    //const char* filename = "../The Legend of Zelda Ocarina of Time - Song of Storms.mid";
+    //const char *filename = "../Guns n Roses - Sweet Child O Mine.mid";
+
     if (argc > 1)
     {
         filename = argv[1];
