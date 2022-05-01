@@ -73,61 +73,124 @@ class Piano : public Instrument
     uint32_t m_time;
     struct Channel
     {
-        bool m_pressed = false;
+        enum Envelope { OFF, ATTACK, DECAY, SUSTAIN, RELEASE};
+        Envelope m_envelope = OFF;
         uint32_t m_time=0;
         uint32_t m_velocity = 0;
         uint32_t m_period = 0;
         uint8_t m_note = 0;
+        uint32_t m_sample_rate = 0;
 
         // sqaure stuff
         uint32_t m_phase = 0;
         bool m_square = false;
-        float playSquareWave(uint32_t time, float vol)
+        float playSquareWave(uint32_t time)
         {
             while (m_phase < time)
             {
                 m_phase += m_period;
                 m_square = !m_square;
             }
+            return m_square ? 1.0f : -1.0f;
+        }
 
-            return m_square ? vol : -vol;
+        void press(uint32_t time, unsigned char note, unsigned char velocity)
+        {
+            if(velocity>0)
+            {
+                m_envelope=ATTACK;
+                m_time = 0;
+                m_note = note;
+                m_velocity = velocity;
+                m_phase = time;
+                m_period = (uint32_t)(m_sample_rate / NoteToFreq(note))/2;
+            }
+            else
+            {
+                release(time, note, velocity);
+            }
+        }
+
+        void release(uint32_t time, unsigned char note, unsigned char velocity)
+        {
+            switch(m_envelope)
+            {
+                case ATTACK:
+                case DECAY:
+                    m_envelope=RELEASE;
+                    break;
+                case SUSTAIN:
+                    m_envelope=DECAY;
+                    break;
+            }
+            m_time = 0;
         }
 
         float render(uint32_t time)
         {
-            if (m_note > 0)
+            if (m_note <=0)
+                return 0;
+            
+            uint32_t attackDuration  = m_sample_rate * 0.01f;
+            uint32_t decayDuration   = m_sample_rate * 0.1f;
+            uint32_t sustainDuration = m_sample_rate * 0.2f;
+            uint32_t releaseDuration = m_sample_rate * 0.2f;
+
+            float vol = 0.0;
+
+            switch(m_envelope)
             {
-                if (m_pressed)
-                {
-                    return playSquareWave(time, m_velocity);
-                }
-                else
-                {
-                    uint32_t timeSinceReleased = time - m_time;
-                    //uint32_t noteDuration = m_velocity * 1000000;
-                    uint32_t noteDuration = 100000;
-
-                    if (timeSinceReleased < noteDuration)
+                case ATTACK:
+                    if (m_time<=attackDuration)
                     {
-                        float t = (float)timeSinceReleased / (float)noteDuration;
-                        float vol = 1.0f - t;
+                        vol = (float)m_time / (float)attackDuration;
+                        break;
+                    }
+                    m_envelope = DECAY;
+                    m_time = 0;
 
-                        return playSquareWave(time, m_velocity * vol);
-                    }
-                    else
+                case DECAY:
+                    if (m_time <= decayDuration)
                     {
-                        m_note = 0;
+                        float t = (float)m_time / (float)decayDuration;
+                        vol =  0.5f + 0.5f*(1-t);                    
+                        break;
                     }
-                }
+                    m_envelope = SUSTAIN;
+                    m_time = 0;
+
+                case SUSTAIN:
+                    if (m_time <= sustainDuration)
+                    {
+                        vol = 0.5f;                    
+                        break;
+                    }
+                    m_envelope = RELEASE;
+                    m_time = 0;
+
+                case RELEASE:
+                    if (m_time <= releaseDuration)
+                    {
+                        float t = ((float)m_time / (float)releaseDuration);                        
+                        vol = 0.5f*(1-t);
+                        break;
+                    }
+                    m_envelope = OFF;
+                    m_time = 0;
+
+                case OFF:
+                    m_note = 0;
+                    return 0.0;
             }
 
-            return 0;
+            m_time++;
+            return playSquareWave(time) * vol * (m_velocity/127.0f);
         }
     };
 
     Channel m_channel[20];
-    uint32_t m_noteDuration;
     uint32_t m_sample_rate;
+    uint32_t m_noteDuration;
 
 public:
     Piano(uint32_t sample_rate)
@@ -135,7 +198,7 @@ public:
         m_sample_rate = sample_rate;
 
         for (int i = 0; i < _countof(m_channel); i++)
-            memset(&m_channel[i], 0, sizeof(Channel));
+        m_channel[i].m_sample_rate = sample_rate;
 
         m_time = 0;
     }
@@ -158,9 +221,7 @@ public:
 
         if (channelId >=0)
         {
-            m_channel[channelId].m_pressed = false;
-            m_channel[channelId].m_time = m_time;
-            m_channel[channelId].m_velocity = velocity;
+            m_channel[channelId].release(m_time, note, velocity);
         }
 
         return channelId;
@@ -196,12 +257,7 @@ public:
 
         if (channelId >= 0)
         {
-            m_channel[channelId].m_pressed = true;
-            m_channel[channelId].m_note = note;
-            m_channel[channelId].m_velocity = velocity;
-            m_channel[channelId].m_time = m_time;
-            m_channel[channelId].m_phase = m_time;
-            m_channel[channelId].m_period = (uint32_t)(1000000.0f / NoteToFreq(note))/2;
+            m_channel[channelId].press(m_time, note, velocity);
         }
 
         return channelId;
@@ -218,7 +274,7 @@ public:
 
         out /= _countof(m_channel);
 
-        m_time += 1000000 / m_sample_rate;
+        m_time ++;
 
         return out;
     }
@@ -232,6 +288,10 @@ public:
         {
             uint8_t key = pdata[1];
             uint8_t speed = pdata[2];
+
+            if (channel==9)
+                return;
+            //printf("%i %i, %i %i\n", subType, channel, key, speed);
 
             if (subType == 8)
             {
@@ -266,7 +326,7 @@ public:
             int32_t note = m_channel[channel].m_note;
             float freq = NoteToFreqFrac((float)note + 10.0 * t);
 
-            m_channel[channel].m_period = (uint32_t)(1000000.0f / freq) / 2;
+            m_channel[channel].m_period = (uint32_t)(m_sample_rate/ freq) / 2;
 
             //m_channel[channel].m_note += pitch_bend;
             printf("pitch bend %i: %i\n", channel, pitch_wheel);
@@ -297,7 +357,7 @@ public:
         keyboard[128] = 0;
 
         for (int t = 0; t < _countof(m_channel); t++)
-            if (m_channel[t].m_note > 0)
+            if (m_channel[t].m_envelope != Channel::OFF )
                 keyboard[m_channel[t].m_note] = '#';
 
         printf("%s\n", keyboard);
@@ -491,8 +551,8 @@ class MidiTrack : public MidiStream
     uint64_t m_nextTime;
     uint32_t m_channel;
     unsigned char m_lastType;
-    char* m_TrackName;
-    char* m_InstrumentName;
+    const char* m_TrackName;
+    const char* m_InstrumentName;
     uint8_t m_status;
     uint32_t m_timesignatureNum = 4;
     uint32_t m_timesignatureDen = 4;
@@ -538,7 +598,7 @@ public:
 
                     if (metaType >= 0x01 && metaType <= 0x05)
                     {
-                        char* ChunkType[] = { "text event", "copyright", "track name", "instrument", "lyrics" };
+                        const char* ChunkType[] = { "text event", "copyright", "track name", "instrument", "lyrics" };
 
                         if (metaType == 3)
                         {
@@ -750,7 +810,6 @@ public:
                 m_samples_to_render = ((uint64_t)sampleRate * event_time) / 1000000;
             }
 
-            //if (m_time>98000 )
             if (true)
             {
                 int n_samples = MIN(size, m_samples_to_render);
@@ -933,25 +992,39 @@ static void callback(snd_async_handler_t *pcm_callback)
     pthread_cond_signal(&condition);    
 }
 
+snd_pcm_t *playback_handle;
+float buf[2*4096];
+Midi *pMidi2;
+int playback_callback (snd_pcm_sframes_t nframes)
+{
+    pMidi2->RenderMidi(48000, 2, nframes, buf);
+
+    int err;
+    if ((err = snd_pcm_writei (playback_handle, buf, nframes)) < 0) {
+        fprintf (stderr, "write failed (%s)\n", snd_strerror (err));
+    }
+
+    return err;
+}
+
 void playLoop(Midi *pMidi, float nSeconds, uint32_t  samplesPerSecond = 48000)
 {
     uint32_t channels = 2;
-
+    pMidi2=pMidi;
     pthread_cond_init(&condition, NULL);
     pthread_mutex_init(&signalMutex, NULL);
 
-    const char *device = "plughw:0,0";
+    const char *device = "default";
     snd_output_t *output = NULL;
     
     int err;       
-    snd_pcm_t *pcm_handle;
-    if ((err = snd_pcm_open(&pcm_handle, device, SND_PCM_STREAM_PLAYBACK, 0)) < 0) 
+    if ((err = snd_pcm_open(&playback_handle, device, SND_PCM_STREAM_PLAYBACK,  SND_PCM_ASYNC)) < 0) 
     {
         printf("Playback open error: %s\n", snd_strerror(err));
         exit(EXIT_FAILURE);
     }
     
-    if ((err = snd_pcm_set_params(pcm_handle,
+    if ((err = snd_pcm_set_params(playback_handle,
                                   SND_PCM_FORMAT_FLOAT_LE,
                                   SND_PCM_ACCESS_RW_INTERLEAVED,
                                   channels,
@@ -960,67 +1033,92 @@ void playLoop(Midi *pMidi, float nSeconds, uint32_t  samplesPerSecond = 48000)
                                   200000
                                   )) < 0) 
     {   
-        printf("Playback open error: %s\n", snd_strerror(err));
+        printf("Playback open error: %s\n", snd_strerror(err)); 
         exit(EXIT_FAILURE);
     }        
     
-    size_t frameSize = snd_pcm_frames_to_bytes(pcm_handle, 1);
+    size_t frameSize = snd_pcm_frames_to_bytes(playback_handle, 1);
     printf("framer size %lu\n", frameSize);
         
     snd_pcm_uframes_t buffer_size;
     snd_pcm_uframes_t period_size;
-    snd_pcm_get_params(	pcm_handle, &buffer_size, &period_size);
+    snd_pcm_get_params(	playback_handle, &buffer_size, &period_size);
     printf("Output buffer and period size %lu, %lu\n", buffer_size, period_size);
-    
-    // set async mode    
-    snd_async_handler_t *pcm_callback;
-    err = snd_async_add_pcm_handler(&pcm_callback,pcm_handle,callback,NULL);
-    if (err < 0) 
-    {
-        fprintf(stderr, "unable to add async handler %i (%s)\n", err, snd_strerror(err));
-        exit(EXIT_FAILURE);
-    } 
-           
-    // allocate buffer
-    float *buffer = (float *)calloc(buffer_size, frameSize);
-    nBuffer = (size_t)(period_size);  
-    uint32_t bufferCount = buffer_size/period_size;
 
-    uint32_t index = 0;
-    uint32_t blocksRendered = 0;
-    for (;;)
-    {        
-        // Render audio
-        //
-        float *buf = &buffer[index * nBuffer];
-        if (pMidi->RenderMidi(samplesPerSecond, channels, nBuffer, buf) == false)
-            break;
-        blocksRendered++;
+    snd_pcm_sframes_t frames_to_deliver;
 
-        // Play audio
-        {
-            snd_pcm_sframes_t frames = snd_pcm_writei(pcm_handle, buf, nBuffer);
-            if (frames < 0)
-                    frames = snd_pcm_recover(pcm_handle, frames, 0);
-            if (frames < 0) {
-                    printf("snd_pcm_writei failed: %s\n", snd_strerror(err));
-                    break;
+    /* tell ALSA to wake us up whenever 4096 or more frames
+        of playback data can be delivered. Also, tell
+        ALSA that we'll start the device ourselves.
+    */
+	snd_pcm_sw_params_t *sw_params;
+    if ((err = snd_pcm_sw_params_malloc (&sw_params)) < 0) {
+        fprintf (stderr, "cannot allocate software parameters structure (%s)\n",
+                snd_strerror (err));
+        exit (1);
+    }
+    if ((err = snd_pcm_sw_params_current (playback_handle, sw_params)) < 0) {
+        fprintf (stderr, "cannot initialize software parameters structure (%s)\n",
+                snd_strerror (err));
+        exit (1);
+    }
+    if ((err = snd_pcm_sw_params_set_avail_min (playback_handle, sw_params, 4096)) < 0) {
+        fprintf (stderr, "cannot set minimum available count (%s)\n",
+                snd_strerror (err));
+        exit (1);
+    }
+    if ((err = snd_pcm_sw_params_set_start_threshold (playback_handle, sw_params, 0U)) < 0) {
+        fprintf (stderr, "cannot set start mode (%s)\n",
+                snd_strerror (err));
+        exit (1);
+    }
+    if ((err = snd_pcm_sw_params (playback_handle, sw_params)) < 0) {
+        fprintf (stderr, "cannot set software parameters (%s)\n",
+                snd_strerror (err));
+        exit (1);
+    }
+
+    if ((err = snd_pcm_prepare (playback_handle)) < 0) {
+        fprintf (stderr, "cannot prepare audio interface for use (%s)\n",
+                snd_strerror (err));
+        exit (1);
+    }
+
+    while (1) {
+
+        /* wait till the interface is ready for data, or 1 second
+            has elapsed.
+        */
+
+        if ((err = snd_pcm_wait (playback_handle, 1000)) < 0) {
+                fprintf (stderr, "poll failed (%s)\n", strerror (errno));
+                break;
+        }	           
+
+        /* find out how much space is available for playback data */
+
+        if ((frames_to_deliver = snd_pcm_avail_update (playback_handle)) < 0) {
+            if (frames_to_deliver == -EPIPE) {
+                fprintf (stderr, "an xrun occured\n");
+                break;
+            } else {
+                fprintf (stderr, "unknown ALSA avail update return value (%ld)\n", 
+                        frames_to_deliver);
+                break;
             }
-            //if (frames > 0 && frames < (long)sizeof(buffer))
-            //    printf("Short write (expected %li, wrote %li)\n", (long)sizeof(buffer), frames);
-            
-            index = (index + 1) % bufferCount;
         }
 
-        // Pause rendering thread if we are getting too ahead
-        //
-        if (blocksRendered  >= blocksPlayed + bufferCount)
-        {
-            pthread_cond_wait(&condition, &signalMutex);
-        }            
+        frames_to_deliver = frames_to_deliver > 4096 ? 4096 : frames_to_deliver;
+
+        /* deliver the data */
+
+        if (playback_callback (frames_to_deliver) != frames_to_deliver) {
+                fprintf (stderr, "playback callback failed\n");
+            break;
+        }
     }
     
-    snd_pcm_close(pcm_handle);
+    snd_pcm_close(playback_handle);
 }
 #endif
 
@@ -1030,15 +1128,18 @@ void playLoop(Midi *pMidi, float nSeconds, uint32_t  samplesPerSecond = 48000)
 
 int main(int argc, char **argv)
 {
-    const char *filename = "../Mario-Sheet-Music-Overworld-Main-Theme.mid";
+    //const char *filename = "../Mario-Sheet-Music-Overworld-Main-Theme.mid";
     //const char* filename = "../32175_Yie-Ar-KungFu.mid";
     //const char* filename = "../slowman.mid";
     //const char *filename = "../AroundTheWorld.mid";
     //const char *filename = "../Tetris - Tetris Main Theme.mid";
     //const char* filename = "../darude-sandstorm.mid";
+    const char* filename = "../Gigi_Dagostino__Lamour_Toujours.mid";
     //const char* filename = "../Never-Gonna-Give-You-Up-3.mid";
     //const char *filename = "../stage-1.mid";
     //const char *filename = "../doom.mid";
+    //const char *filename = "../TakeOnMe.mid";
+    //const char *filename = "../BadRomance.mid";
     //const char* filename = "../The Legend of Zelda Ocarina of Time - Song of Storms.mid";
     //const char *filename = "../Guns n Roses - Sweet Child O Mine.mid";
 

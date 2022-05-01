@@ -1,6 +1,9 @@
-cmake_minimum_required(VERSION 2.8.9)
-set(CMAKE_SUPPRESS_REGENERATION true)
-project (SimpleMidi)
+cmake_minimum_required(VERSION 3.0.0)
+project(SimpleMidi VERSION 0.1.0)
+
+include(CTest)
+enable_testing()
+
 add_executable(SimpleMidi SimpleMidi.cpp)
 
 if (${UNIX})
@@ -19,6 +22,6 @@ elseif (${APPLE})
   # ...
 endif (${UNIX})
 
-set_property(DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR} PROPERTY VS_STARTUP_PROJECT SimpleMidi)
-set(CMAKE_RUNTIME_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}/)
-set(EXECUTABLE_OUTPUT_PATH "bin")
+set(CPACK_PROJECT_NAME ${PROJECT_NAME})
+set(CPACK_PROJECT_VERSION ${PROJECT_VERSION})
+include(CPack)
