@@ -41,12 +41,12 @@ bool load_file(const char* filename, uint8_t** pOut, size_t* pSize)
 
 float NoteToFreq(int note)
 {
-    return (float)pow(2.0f, (note - 69) / 12.0f) * 440.0f;
+    return (float)pow(2.0f, (note - 69.0f) / 12.0f) * 440.0f;
 }
 
 float NoteToFreqFrac(float note)
 {
-    return (float)pow(2.0f, (note - 69) / 12.0f) * 440.0f;
+    return (float)pow(2.0f, (note - 69.0f) / 12.0f) * 440.0f;
 }
 
 void printNote(unsigned char note)
@@ -120,7 +120,7 @@ class Piano : public Instrument
                     m_envelope=RELEASE;
                     break;
                 case SUSTAIN:
-                    m_envelope=DECAY;
+                    m_envelope=RELEASE;
                     break;
             }
             m_time = 0;
@@ -133,7 +133,7 @@ class Piano : public Instrument
             
             uint32_t attackDuration  = m_sample_rate * 0.01f;
             uint32_t decayDuration   = m_sample_rate * 0.1f;
-            uint32_t sustainDuration = m_sample_rate * 0.2f;
+            uint32_t sustainDuration = m_sample_rate * 0.5f;
             uint32_t releaseDuration = m_sample_rate * 0.2f;
 
             float vol = 0.0;
@@ -289,8 +289,8 @@ public:
             uint8_t key = pdata[1];
             uint8_t speed = pdata[2];
 
-            if (channel==9)
-                return;
+            //if (channel==9)
+            //    return;
             //printf("%i %i, %i %i\n", subType, channel, key, speed);
 
             if (subType == 8)
@@ -782,8 +782,10 @@ public:
         m_samples_to_render = 0;
     }
 
-    bool RenderMidi(const uint32_t sampleRate, const uint32_t channels, size_t size, float *pOut)
+    size_t RenderMidi(const uint32_t sampleRate, const uint32_t channels, size_t size, float *pOut)
     {
+        size_t size_org = size;
+
         while (size>0)
         {
             if (m_samples_to_render == 0)
@@ -799,9 +801,9 @@ public:
                 }
 
                 if (m_nextEventTime == 0xffffffff)
-                    return false;
+                    break;
 
-                printf("%6i - %6i [%5i]", m_time, m_nextEventTime, microSecondsPerMidiTick);
+                printf("%6i - %4i [%5i]", m_time, m_nextEventTime-m_time, microSecondsPerMidiTick);
                 piano.printKeyboard();
 
                 uint64_t event_time = (uint64_t)(m_nextEventTime - m_time) * microSecondsPerMidiTick;
@@ -825,7 +827,7 @@ public:
             }
         }
 
-        return true;
+        return size_org - size;
     }
 
     bool LoadMidi(uint8_t *midi_buffer, size_t midi_buffer_size)
@@ -997,7 +999,9 @@ float buf[2*4096];
 Midi *pMidi2;
 int playback_callback (snd_pcm_sframes_t nframes)
 {
-    pMidi2->RenderMidi(48000, 2, nframes, buf);
+    nframes = pMidi2->RenderMidi(48000, 2, nframes, buf);
+    if (nframes==0)
+        return 0;
 
     int err;
     if ((err = snd_pcm_writei (playback_handle, buf, nframes)) < 0) {
@@ -1111,13 +1115,22 @@ void playLoop(Midi *pMidi, float nSeconds, uint32_t  samplesPerSecond = 48000)
         frames_to_deliver = frames_to_deliver > 4096 ? 4096 : frames_to_deliver;
 
         /* deliver the data */
-
-        if (playback_callback (frames_to_deliver) != frames_to_deliver) {
-                fprintf (stderr, "playback callback failed\n");
+        int res = playback_callback (frames_to_deliver);
+        if (res==0)
+        {
+            printf("done\n");
+            break;
+        }
+        else if ( res<0) 
+        {
+            fprintf (stderr, "playback callback failed\n");
             break;
         }
     }
     
+    snd_pcm_nonblock(playback_handle, 0); // block
+    snd_pcm_drain(playback_handle);
+
     snd_pcm_close(playback_handle);
 }
 #endif
@@ -1134,14 +1147,23 @@ int main(int argc, char **argv)
     //const char *filename = "../AroundTheWorld.mid";
     //const char *filename = "../Tetris - Tetris Main Theme.mid";
     //const char* filename = "../darude-sandstorm.mid";
-    const char* filename = "../Gigi_Dagostino__Lamour_Toujours.mid";
+    //const char* filename = "../Gigi_Dagostino__Lamour_Toujours.mid";
     //const char* filename = "../Never-Gonna-Give-You-Up-3.mid";
     //const char *filename = "../stage-1.mid";
     //const char *filename = "../doom.mid";
     //const char *filename = "../TakeOnMe.mid";
+    //const char *filename = "../Guns n Roses - November Rain.mid";
+    //const char *filename = "../mozart-piano-concerto-21-2-elvira-madigan-piano-solo.mid";
+    //const char *filename = "../John Lennon - Imagine.mid";
     //const char *filename = "../BadRomance.mid";
-    //const char* filename = "../The Legend of Zelda Ocarina of Time - Song of Storms.mid";
+    const char* filename = "../The Legend of Zelda Ocarina of Time - Song of Storms.mid";
+    //const char* filename = "../The Legend of Zelda Ocarina of Time - New Ocarina Melody.mid";
     //const char *filename = "../Guns n Roses - Sweet Child O Mine.mid";
+    //const char *filename = "../goonies.mid";
+    //const char *filename = "../kungfu.mid";
+    //const char *filename = "../metalgr1.mid";
+    //const char *filename = "../MetalGearMSX_OperationIntrudeN313.mid";
+    //const char *filename = "../Theme_of_tara_jannee2.mid";
 
     if (argc > 1)
     {
