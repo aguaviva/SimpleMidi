@@ -3,8 +3,13 @@ project(SimpleMidi VERSION 0.1.0)
 
 include(CTest)
 enable_testing()
+find_package(glfw3 REQUIRED)
 
-add_executable(SimpleMidi SimpleMidi.cpp)
+add_subdirectory(Imgui)
+
+add_executable(SimpleMidi SimpleMidi.cpp inst-piano.cpp audio.cpp misc.cpp midi.cpp)
+target_link_libraries(SimpleMidi Imgui OpenGL glfw)
+
 
 if (${UNIX})
     # *nix-specific includes or actions
@@ -24,4 +29,4 @@ endif (${UNIX})
 
 set(CPACK_PROJECT_NAME ${PROJECT_NAME})
 set(CPACK_PROJECT_VERSION ${PROJECT_VERSION})
-include(CPack)
+include(CPack) 
