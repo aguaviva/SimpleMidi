@@ -45,11 +45,6 @@ public:
     {
         m_pSynth->render(pOut, n_samples);
     }
-
-    void printKeyboard()
-    {
-        printf("\n");
-    }
 };
 
 MT32EMU piano(48000);

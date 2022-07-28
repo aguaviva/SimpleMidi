@@ -24,3 +24,11 @@ bool load_file(const char* filename, uint8_t** pOut, size_t* pSize)
 
     return true;
 }
+
+
+int lerp(int i, int ini, int fin, int out_ini, int out_fin)
+{
+    float t = (float)(i - ini) / (float)(fin - ini);
+
+    return t*(float)out_fin + (1.0f-t)*(float)out_ini;
+}

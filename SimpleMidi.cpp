@@ -7,6 +7,7 @@
 #include <stdint.h>
 #include <stdlib.h>
 #include <string.h>
+#include <thread>
 #include <map>
 
 #include "audio.h"
@@ -14,7 +15,6 @@
 
 #include "inst-piano.h"
 
-Instrument *pPiano = GetPiano();
 Midi midi;
 
 #include "imgui.h"
@@ -42,7 +42,7 @@ GLFWwindow* initui()
     glfwWindowHint(GLFW_CONTEXT_VERSION_MINOR, 0);
 
 
-   GLFWwindow* window = glfwCreateWindow(1280, 720, "Dear ImGui GLFW+OpenGL2 example", NULL, NULL);
+   GLFWwindow* window = glfwCreateWindow(1280, 920, "Dear ImGui GLFW+OpenGL2 example", NULL, NULL);
    if (window == NULL)
        return NULL;
    glfwMakeContextCurrent(window);
@@ -65,6 +65,28 @@ GLFWwindow* initui()
    return window;
 }
 
+
+class InstrumentMinMax : public Instrument
+{    
+public:
+    uint8_t m_min_key = 255;
+    uint8_t m_max_key = 0;
+    virtual void send_midi(uint8_t* pdata, size_t size)
+    {
+        unsigned char subType = pdata[0] >> 4;
+        unsigned char channel = pdata[0] & 0xf; 
+
+        if (subType == 0x8 || subType == 0x9)
+        {
+            uint8_t key = pdata[1];
+            uint8_t speed = pdata[2];
+            m_min_key = MIN(m_min_key, key);
+            m_max_key = MAX(m_max_key, key);
+        }
+    };
+    virtual void render_samples(int n_samples, float* pOut) {};
+};
+
 class drawInst : public Instrument
 {
 public:
@@ -72,6 +94,9 @@ public:
     ImVec2 canvas_p1;
     ImVec4 m_color;
     float m_time;
+
+    uint8_t m_min_key = 0;
+    uint8_t m_max_key = 0;
 
     std::map<int32_t,float> m_key; 
 
@@ -87,18 +112,16 @@ public:
             uint8_t key = pdata[1];
             uint8_t speed = pdata[2];
 
-            //if (channel==9)
-            //    return;
-            //printf("%i %i, %i %i\n", subType, channel, key, speed);
-
-            if (subType == 8)
+            if (subType == 8 || speed==0)
             {
                 float time = m_key[key];
 
-                float y = key - 10;
+                int32_t y0 = lerp(key, m_min_key, m_max_key, canvas_p1.y, canvas_p0.y);
+                int32_t y1 = lerp(key+1, m_min_key, m_max_key, canvas_p1.y, canvas_p0.y);
+
                 draw_list->AddRectFilled(
-                    ImVec2(canvas_p0.x + time       , canvas_p0.y + y * 5.0f), 
-                    ImVec2(canvas_p0.x + m_time, canvas_p0.y + (y+1) * 5.0f),
+                    ImVec2(canvas_p0.x + time  , y0), 
+                    ImVec2(canvas_p0.x + m_time, y1),
                     IM_COL32(m_color.x*255, m_color.y*255, m_color.z*255, m_color.w*255));
             }
             else if (subType == 9)
@@ -108,9 +131,129 @@ public:
         }        
     }
     virtual void render_samples(int n_samples, float* pOut) {}
-    virtual void printKeyboard() {}
 };            
 
+void GetTimingChanges(Midi *pMidi)
+{
+    for (int t=0;t<pMidi->GetTrackCount();t++)
+    {
+        MidiTrack *pTrackOrg = pMidi->GetTrack(t);
+    }
+}
+
+static ImVec2 scrolling(0.0f, 0.0f);
+static bool opt_enable_grid = true;
+static bool opt_enable_context_menu = true;
+float seconds_per = 5.0f;
+void draw_track(int t, Midi *pMidi, float time, ImVec4 color)
+{
+    MidiTrack *pTrackOrg = pMidi->GetTrack(t);
+
+    MidiTrack track(*pTrackOrg);
+    track.m_pMidiState = NULL;
+
+    InstrumentMinMax I;
+    track.pPiano = &I;
+    {
+        track.Reset();
+
+        uint32_t midi_ticks = 0;
+        while (midi_ticks!=0xffffffff)
+        {
+            uint32_t next_tick = midi.m_midi_state.m_microSecondsPerMidiTick * midi.m_midi_state.m_midi_ticks_per_metronome_tick;
+
+            midi_ticks = track.play(midi_ticks);
+        }        
+    }
+    if (I.m_min_key>I.m_max_key)
+        return;
+
+    ImGui::PushID(t);
+    ImGui::Checkbox("", &pTrackOrg->pPiano->m_mute); 
+    ImGui::SameLine();
+    ImGui::Text("%i %s %s", pTrackOrg->m_channel, pTrackOrg->m_TrackName, pTrackOrg->m_InstrumentName);
+    ImGui::SameLine();
+    ImGui::Text("time sig: %i/%i", pTrackOrg->m_timesignatureNum, pTrackOrg->m_timesignatureDen);
+    ImGui::PopID();
+
+    ImVec2 canvas_p0 = ImGui::GetCursorScreenPos();      // ImDrawList API uses screen coordinates!
+    ImVec2 canvas_sz = ImGui::GetContentRegionAvail();   // Resize canvas to what's available
+    canvas_sz.y = 80;
+    if (canvas_sz.x < 50.0f) canvas_sz.x = 50.0f;
+    if (canvas_sz.y < 50.0f) canvas_sz.y = 50.0f;
+    ImVec2 canvas_p1 = ImVec2(canvas_p0.x + canvas_sz.x, canvas_p0.y + canvas_sz.y);
+
+    // Draw border and background color
+    ImGuiIO& io = ImGui::GetIO();
+    ImDrawList* draw_list = ImGui::GetWindowDrawList();
+    draw_list->AddRectFilled(canvas_p0, canvas_p1, IM_COL32(50, 50, 50, 255));
+    draw_list->AddRect(canvas_p0, canvas_p1, IM_COL32(255, 255, 255, 255));
+
+    // This will catch our interactions
+    ImGui::PushID(t);
+    ImGui::InvisibleButton("##", canvas_sz, ImGuiButtonFlags_MouseButtonLeft | ImGuiButtonFlags_MouseButtonRight);
+    ImGui::PopID();
+    const bool is_hovered = ImGui::IsItemHovered(); // Hovered
+    const bool is_active = ImGui::IsItemActive();   // Held
+    const ImVec2 top_left(canvas_p0.x + scrolling.x, canvas_p0.y + scrolling.y); // Lock scrolled top_left
+    const ImVec2 bottom_right(canvas_p1.x + scrolling.x, canvas_p1.y + scrolling.y); // Lock scrolled top_left
+    const ImVec2 mouse_pos_in_canvas(io.MousePos.x - top_left.x, io.MousePos.y - top_left.y);
+
+    float tt = canvas_sz.x * time /  seconds_per;
+    if (tt>100)
+    {
+        scrolling.x = -(tt-100);
+    }
+
+    // Pan (we use a zero mouse threshold when there's no context menu)
+    // You may decide to make that threshold dynamic based on whether the mouse is hovering something etc.
+    const float mouse_threshold_for_pan = opt_enable_context_menu ? -1.0f : 0.0f;
+    if (is_active && ImGui::IsMouseDragging(ImGuiMouseButton_Right, mouse_threshold_for_pan))
+    {
+        scrolling.x += io.MouseDelta.x;
+        scrolling.y += io.MouseDelta.y;
+    }
+
+    // Draw grid + all lines in the canvas
+    draw_list->PushClipRect(canvas_p0, canvas_p1, true);
+    if (opt_enable_grid)
+    {
+        float milliseconds = (midi.m_midi_state.m_microSecondsPerMidiTick * pMidi->m_midi_state.m_midi_ticks_per_metronome_tick) / 1000.0f;
+        float GRID_STEP = (canvas_sz.x * milliseconds)/ (seconds_per * 1000); 
+        
+
+        for (float x = fmodf(scrolling.x, GRID_STEP); x < canvas_sz.x; x += GRID_STEP)
+        {
+            //ImU32 col =  
+            draw_list->AddLine(ImVec2(canvas_p0.x + x, canvas_p0.y), ImVec2(canvas_p0.x + x, canvas_p1.y), IM_COL32(200, 200, 200, 40));
+        }
+        //for (float y = fmodf(scrolling.y, GRID_STEP); y < canvas_sz.y; y += GRID_STEP)
+        //    draw_list->AddLine(ImVec2(canvas_p0.x, canvas_p0.y + y), ImVec2(canvas_p1.x, canvas_p0.y + y), IM_COL32(200, 200, 200, 40));
+    }
+
+    drawInst d;
+    d.m_min_key = I.m_min_key;
+    d.m_max_key = I.m_max_key;
+    d.m_color = color;
+    d.canvas_p0 = top_left;
+    d.canvas_p1 = bottom_right;
+    track.pPiano = &d;
+    track.Reset();
+    uint32_t midi_ticks = 0;
+    while (midi_ticks!=0xffffffff)
+    {
+        float milliseconds = (midi.m_midi_state.m_microSecondsPerMidiTick * midi_ticks) / 1000.0f;
+        d.m_time = (canvas_sz.x * milliseconds)/ (seconds_per * 1000); 
+
+        midi_ticks = track.play(midi_ticks);
+    }
+
+    draw_list->AddLine(ImVec2(canvas_p0.x + scrolling.x + tt, canvas_p0.y), 
+                       ImVec2(canvas_p0.x + scrolling.x + tt, canvas_p1.y),
+                    IM_COL32(255, 255, 0, 255), 2.0f);    
+
+    draw_list->PopClipRect();                
+}
 
 void doui(GLFWwindow* window, Midi *pMidi)
 {
@@ -125,19 +268,35 @@ void doui(GLFWwindow* window, Midi *pMidi)
     bool show_another_window = false;
     ImVec4 clear_color = ImVec4(0.45f, 0.55f, 0.60f, 1.00f);
 
+    // Generate a default palette. The palette will persist and can be edited.
+    static bool saved_palette_init = true;
+    static ImVec4 saved_palette[32] = {};
+    if (saved_palette_init)
+    {
+        for (int n = 0; n < IM_ARRAYSIZE(saved_palette); n++)
+        {
+            ImGui::ColorConvertHSVtoRGB(n / 31.0f, 0.8f, 0.8f,
+                saved_palette[n].x, saved_palette[n].y, saved_palette[n].z);
+            saved_palette[n].w = 1.0f; // Alpha
+        }
+        saved_palette_init = false;
+    }
 
     {
         static float f = 0.0f;
         static int counter = 0;
 
         ImGui::Begin("Hello, world!");                          // Create a window called "Hello, world!" and append into it.
-
+/*
         for (uint32_t t = 0; t < pMidi->GetTrackCount(); t++)
         {
             MidiTrack *pTrack = pMidi->GetTrack(t);
-            //ImGui::Text("%i %s %s", pTrack->m_channel, pTrack->m_TrackName, pTrack->m_InstrumentName);
+            ImGui::Button("##",ImVec2(20,20));
+            ImGui::SameLine();
+            ImGui::Text("%i %s %s", pTrack->m_channel, pTrack->m_TrackName, pTrack->m_InstrumentName);
         }
-
+*/        
+/*
         ImGui::Text("This is some useful text.");               // Display some text (you can use a format strings too)
         ImGui::Checkbox("Demo Window", &show_demo_window);      // Edit bools storing our window open/close state
         ImGui::Checkbox("Another Window", &show_another_window);
@@ -149,90 +308,19 @@ void doui(GLFWwindow* window, Midi *pMidi)
             counter++;
         ImGui::SameLine();
         ImGui::Text("counter = %d", counter);
-
+*/
         ImGui::Text("Application average %.3f ms/frame (%.1f FPS)", 1000.0f / ImGui::GetIO().Framerate, ImGui::GetIO().Framerate);
-
+        ImGui::Text("m_ticksPerQuarterNote = %d", pMidi->m_midi_state.m_ticksPerQuarterNote);
+        ImGui::Text("m_microSecondsPerMidiTick = %d", pMidi->m_midi_state.m_microSecondsPerMidiTick);
+        ImGui::Text("ms per quarter note = %d", pMidi->m_midi_state.m_microSecondsPerMidiTick * pMidi->m_midi_state.m_ticksPerQuarterNote);
+        static float tt = 0;
+        tt += ImGui::GetIO().DeltaTime;
+        //float time = pMidi->GetTime();
+        float time = tt;
+        ImGui::Text("time = %f", time);
+        for (uint32_t t = 0; t < pMidi->GetTrackCount(); t++)
         {
-            static ImVector<ImVec2> points;
-            static ImVec2 scrolling(0.0f, 0.0f);
-            static bool opt_enable_grid = true;
-            static bool opt_enable_context_menu = true;
-            static bool adding_line = false;
-
-            ImVec2 canvas_p0 = ImGui::GetCursorScreenPos();      // ImDrawList API uses screen coordinates!
-            ImVec2 canvas_sz = ImGui::GetContentRegionAvail();   // Resize canvas to what's available
-            if (canvas_sz.x < 50.0f) canvas_sz.x = 50.0f;
-            if (canvas_sz.y < 50.0f) canvas_sz.y = 50.0f;
-            ImVec2 canvas_p1 = ImVec2(canvas_p0.x + canvas_sz.x, canvas_p0.y + canvas_sz.y);
-
-           // Draw border and background color
-            ImGuiIO& io = ImGui::GetIO();
-            ImDrawList* draw_list = ImGui::GetWindowDrawList();
-            draw_list->AddRectFilled(canvas_p0, canvas_p1, IM_COL32(50, 50, 50, 255));
-            draw_list->AddRect(canvas_p0, canvas_p1, IM_COL32(255, 255, 255, 255));
-
-            // This will catch our interactions
-            ImGui::InvisibleButton("canvas", canvas_sz, ImGuiButtonFlags_MouseButtonLeft | ImGuiButtonFlags_MouseButtonRight);
-            const bool is_hovered = ImGui::IsItemHovered(); // Hovered
-            const bool is_active = ImGui::IsItemActive();   // Held
-            const ImVec2 origin(canvas_p0.x + scrolling.x, canvas_p0.y + scrolling.y); // Lock scrolled origin
-            const ImVec2 mouse_pos_in_canvas(io.MousePos.x - origin.x, io.MousePos.y - origin.y);
-
-            // Pan (we use a zero mouse threshold when there's no context menu)
-            // You may decide to make that threshold dynamic based on whether the mouse is hovering something etc.
-            const float mouse_threshold_for_pan = opt_enable_context_menu ? -1.0f : 0.0f;
-            if (is_active && ImGui::IsMouseDragging(ImGuiMouseButton_Right, mouse_threshold_for_pan))
-            {
-                scrolling.x += io.MouseDelta.x;
-                scrolling.y += io.MouseDelta.y;
-            }
-
-            // Draw grid + all lines in the canvas
-            draw_list->PushClipRect(canvas_p0, canvas_p1, true);
-            if (opt_enable_grid)
-            {
-                const float GRID_STEP = 64.0f;
-                for (float x = fmodf(scrolling.x, GRID_STEP); x < canvas_sz.x; x += GRID_STEP)
-                    draw_list->AddLine(ImVec2(canvas_p0.x + x, canvas_p0.y), ImVec2(canvas_p0.x + x, canvas_p1.y), IM_COL32(200, 200, 200, 40));
-                for (float y = fmodf(scrolling.y, GRID_STEP); y < canvas_sz.y; y += GRID_STEP)
-                    draw_list->AddLine(ImVec2(canvas_p0.x, canvas_p0.y + y), ImVec2(canvas_p1.x, canvas_p0.y + y), IM_COL32(200, 200, 200, 40));
-            }
-            for (int n = 0; n < points.Size; n += 2)
-                draw_list->AddLine(ImVec2(origin.x + points[n].x, origin.y + points[n].y), ImVec2(origin.x + points[n + 1].x, origin.y + points[n + 1].y), IM_COL32(255, 255, 0, 255), 2.0f);
-
-            // Generate a default palette. The palette will persist and can be edited.
-            static bool saved_palette_init = true;
-            static ImVec4 saved_palette[32] = {};
-            if (saved_palette_init)
-            {
-                for (int n = 0; n < IM_ARRAYSIZE(saved_palette); n++)
-                {
-                    ImGui::ColorConvertHSVtoRGB(n / 31.0f, 0.8f, 0.8f,
-                        saved_palette[n].x, saved_palette[n].y, saved_palette[n].z);
-                    saved_palette[n].w = 1.0f; // Alpha
-                }
-                saved_palette_init = false;
-            }
-            
-            for (uint32_t t = 0; t < pMidi->GetTrackCount(); t++)
-            {
-                MidiTrack m(*pMidi->GetTrack(t));
-                drawInst d;
-                d.m_color = saved_palette[t];
-                d.canvas_p0 = origin;
-                d.canvas_p1 = canvas_p1;
-                m.pPiano = &d;
-                uint32_t midi_ticks = 0;
-                while (midi_ticks!=0xffffffff)
-                {
-                    d.m_time = midi_ticks/10.0f;
-
-                    midi_ticks = m.play(midi_ticks);
-                }
-            }
-
-
-            draw_list->PopClipRect();            
+            draw_track(t, pMidi, time, saved_palette[t]);
         }
 
         ImGui::End();
@@ -250,8 +338,13 @@ void doui(GLFWwindow* window, Midi *pMidi)
     glfwSwapBuffers(window);
 }
 
+bool bExit = false;
+
 int32_t play_callback(int32_t frames_to_deliver, float *buf)
 {
+    if (bExit)
+        return 0;
+
     for (uint32_t i=0;i<frames_to_deliver*2;i++)
         buf[i]=0;
     return midi.RenderMidi(48000, 2, frames_to_deliver, buf);
@@ -264,14 +357,11 @@ int32_t play_callback(int32_t frames_to_deliver, float *buf)
 int main(int argc, char **argv)
 {
     //const char *filename = "Mario-Sheet-Music-Overworld-Main-Theme.mid";
-    //const char* filename = "32175_Yie-Ar-KungFu.mid";
     //const char* filename = "slowman.mid";
-    //const char *filename = "AroundTheWorld.mid";
+    //const char *filename = "Theme From San Andreas.mid";
     //const char *filename = "Tetris - Tetris Main Theme.mid";
     //const char* filename = "darude-sandstorm.mid";
     //const char* filename = "Gigi_Dagostino__Lamour_Toujours.mid";
-    //const char* filename = "Never-Gonna-Give-You-Up-3.mid";
-    //const char *filename = "stage-1.mid";
     //const char *filename = "doom.mid";
     //const char *filename = "TakeOnMe.mid";
     //const char *filename = "Guns n Roses - November Rain.mid";
@@ -282,10 +372,20 @@ int main(int argc, char **argv)
     //const char* filename = "The Legend of Zelda Ocarina of Time - New Ocarina Melody.mid";
     //const char *filename = "Guns n Roses - Sweet Child O Mine.mid";
     //const char *filename = "goonies.mid";
-    //const char *filename = "kungfu.mid";
+    const char *filename = "kungfu.mid";
     //const char *filename = "metalgr1.mid";
     //const char *filename = "MetalGearMSX_OperationIntrudeN313.mid";
-    const char *filename = "Theme_of_tara_jannee2.mid";
+    //const char *filename = "Theme_of_tara_jannee2.mid";
+    //const char *filename = "Dr_Dre_Still_Dre_Ft_Snoop_Dog.mid";
+    //const char *filename = "Star_Wars__Imperial_March.mid";
+    //const char *filename = "Indiana_Jones__Theme_Music.mid";
+    //const char *filename = "Ennio_Morricone_OnceuponatimeinAmerica.mid";
+    //const char *filename = "Simpsonstheme.mid";
+    //const char *filename = "romanceforclassicalguitar.mid";
+    //const char *filename = "Greek_Zorba.mid";
+    //const char *filename = "Soundtrack_Ghostbusters.mid";
+    //const char *filename = "MADONNA.Holiday K.mid";
+    //const char *filename = "Ennio_Morricone__Thegoodthebadandtheugly.mid";
 
     if (argc > 1)
     {
@@ -301,22 +401,26 @@ int main(int argc, char **argv)
 
     GLFWwindow* window = initui();
 
-    if (midi.LoadMidi(pMidi_buffer, midi_size))
+    if (midi.LoadMidi(pMidi_buffer, midi_size) == false)
+        return 0;
+
+    for (uint32_t t = 0; t < midi.GetTrackCount(); t++)
     {
-        for (uint32_t t = 0; t < midi.GetTrackCount(); t++)
-        {
-            midi.GetTrack(t)->pPiano = GetPiano();
-        }
-
-        while(!glfwWindowShouldClose(window))
-        {
-            doui(window, &midi);
-        }
-
-
-        playLoop(0.1f, 48000, play_callback);
-        free(pMidi_buffer);
+        midi.GetTrack(t)->pPiano = GetNewPiano();
     }
+
+    std::thread t1(playLoop, 0.1f, 48000, play_callback);
+
+    while(!glfwWindowShouldClose(window))
+    {
+        doui(window, &midi);
+    }
+
+    bExit=true;
+
+    t1.join();
+
+    free(pMidi_buffer);
 
     return 0;
 }

@@ -10,6 +10,7 @@
 #include "misc.h"
 
 #define MIN(a,b) ((a<b)?a:b)
+#define MAX(a,b) ((a>b)?a:b)
 
 ///////////////////////////////////////////////////////////////
 // MidiStream 
@@ -32,6 +33,8 @@ public:
         m_pTrackIni = ini;
         m_pTrackFin = fin;
     }
+
+    void Reset() { m_pTrack = m_pTrackIni; }
 
     uint32_t GetVar()
     {
@@ -85,16 +88,25 @@ public:
 
 class Midi;
 
+struct MidiState
+{
+    uint32_t m_time = 0;
+    uint32_t m_nextEventTime = 0;
+    uint32_t m_ticksPerQuarterNote;  //or ticks per beat
+    uint32_t m_midi_ticks_per_metronome_tick = 24;
+    uint32_t m_microSecondsPerMidiTick;
+};
+
 ///////////////////////////////////////////////////////////////
 // MidiTrack
 ///////////////////////////////////////////////////////////////
 
 class MidiTrack : public MidiStream
 {
-    uint64_t m_nextTime;
-    unsigned char m_lastType;
-    Midi *m_pMidi;
+    uint64_t m_nextTime = 0;
+    unsigned char m_lastType = 0;
 public:
+    MidiState *m_pMidiState;
     uint32_t m_channel;
     const char* m_TrackName;
     const char* m_InstrumentName;
@@ -103,7 +115,8 @@ public:
     uint32_t m_timesignatureDen = 4;
     Instrument *pPiano = NULL;
 
-    MidiTrack(uint8_t *ini, uint8_t*fin, Midi *pMidi = NULL);
+    MidiTrack(uint8_t *ini, uint8_t*fin, MidiState *pMidiState = NULL);
+    void Reset();
     uint32_t play(uint32_t midi_ticks);
 };
 
@@ -111,24 +124,23 @@ public:
 // Midi
 ///////////////////////////////////////////////////////////////
 
+
 class Midi
 {
-    uint32_t m_time;
-
     MidiTrack *m_pTrack[50];
-    uint32_t m_tracks;
-    uint32_t m_nextEventTime;
+    uint32_t m_tracks = 0;
+    uint32_t m_sample_rate;
+    uint32_t m_output_channel_count;
 
     uint32_t m_samples_to_render;
 public:
-    uint32_t m_ticksPerQuarterNote;  //or ticks per beat
-    float m_quarterNote = 24;
-    uint32_t m_microSecondsPerMidiTick;
+    MidiState m_midi_state;
 
     Midi();
     uint32_t GetTrackCount() { return m_tracks; }
     MidiTrack *GetTrack(uint32_t i) { return m_pTrack[i]; }
-
+    float GetTime();
     size_t RenderMidi(const uint32_t sampleRate, const uint32_t channels, size_t size, float *pOut);
     bool LoadMidi(uint8_t *midi_buffer, size_t midi_buffer_size);
+    void Reset();
 };

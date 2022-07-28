@@ -11,6 +11,7 @@
 #include <string.h>
 
 #include "instrument.h"
+#include "misc.h"
 
 #ifndef _countof
 #define _countof(a) (sizeof(a)/sizeof(*(a)))
@@ -32,128 +33,161 @@ void printNote(unsigned char note)
     printf("%s%i", notes[note % 12], (note / 12)-1);
 }
 
+class ADSR
+{
+    enum Envelope { OFF, ATTACK, DECAY, SUSTAIN, RELEASE};
+
+    Envelope m_envelope = OFF;
+    uint32_t m_time = 0;
+    uint32_t m_sample_rate = 0;
+public:
+    void set_sample_rate(uint32_t sample_rate)
+    {
+        m_sample_rate = sample_rate;
+    }
+
+    void press()
+    {
+        m_envelope=ATTACK;
+        m_time = 0;
+    }
+
+    void release()
+    {
+        m_envelope=RELEASE;
+        m_time = 0;
+    }
+
+    float render(uint32_t time2)
+    {
+        uint32_t attackDuration  = m_sample_rate * 0.01f;
+        uint32_t decayDuration   = m_sample_rate * 0.1f;
+        uint32_t releaseDuration = m_sample_rate * 0.2f;
+
+        float vol = 0.0;
+        m_time++;
+
+        switch(m_envelope)
+        {
+            case ATTACK:
+                if (m_time<=attackDuration)
+                {
+                    vol = (float)m_time / (float)attackDuration;
+                    break;
+                }
+                m_envelope = DECAY;
+                m_time = 0;
+
+            case DECAY:
+                if (m_time <= decayDuration)
+                {
+                    float t = (float)m_time / (float)decayDuration;
+                    vol =  0.5f + 0.5f*(1-t);                    
+                    break;
+                }
+                m_envelope = SUSTAIN;
+
+            case SUSTAIN:
+            {
+                vol = 0.5f;                    
+                break;
+            }
+
+            case RELEASE:
+                if (m_time <= releaseDuration)
+                {
+                    float t = ((float)m_time / (float)releaseDuration);                        
+                    vol = 0.5f*(1-t);
+                    break;
+                }
+                m_envelope = OFF;
+                m_time = 0;
+
+            case OFF:
+                vol = 0.0f;
+        }        
+
+        //printf("%f \n", vol);
+        return vol;
+    }
+};
+
+struct Channel
+{
+    uint32_t m_time=0;
+    uint32_t m_velocity = 0;
+    uint32_t m_period = 0;
+    uint8_t m_note = 0;
+    uint32_t m_sample_rate = 0;
+    ADSR m_adsr;
+public:
+    void set_sample_rate(uint32_t sample_rate)
+    {
+        m_sample_rate = sample_rate;
+        m_adsr.set_sample_rate(sample_rate);
+    }
+
+    // sqaure stuff
+    uint32_t m_phase = 0;
+    bool m_square = false;
+    float playSquareWave(uint32_t time)
+    {
+        while (m_phase < time)
+        {
+            m_phase += m_period;
+            m_square = !m_square;
+        }
+
+        //return (float)(m_phase - time) / (float)m_period;
+        return m_square ? 1.0f : -1.0f;
+    }
+
+    void press(uint32_t time, unsigned char note, unsigned char velocity)
+    {
+        if(velocity>0)
+        {
+            m_adsr.press();
+            m_time = 0;
+            m_note = note;
+            m_velocity = velocity;
+            m_phase = time;
+            m_period = (uint32_t)(m_sample_rate / NoteToFreq(note))/2;
+        }
+        else
+        {
+            m_adsr.release();
+            release(time, note, velocity);
+        }
+    }
+
+    void release(uint32_t time, unsigned char note, unsigned char velocity)
+    {
+        m_adsr.release();
+    }
+
+    float render(uint32_t time)
+    {
+        if (m_note <=0)
+            return 0;
+
+        float vol = m_adsr.render(time);
+        if (vol==0.0f)
+        {
+            m_note = 0;
+            return 0;
+        }
+
+        m_time++;
+
+        return playSquareWave(time) * vol * (m_velocity/127.0f);
+    }
+};
+
+
 class Piano : public Instrument
 {
     bool m_omni = false;
     uint32_t m_time;
-    struct Channel
-    {
-        enum Envelope { OFF, ATTACK, DECAY, SUSTAIN, RELEASE};
-        Envelope m_envelope = OFF;
-        uint32_t m_time=0;
-        uint32_t m_velocity = 0;
-        uint32_t m_period = 0;
-        uint8_t m_note = 0;
-        uint32_t m_sample_rate = 0;
-
-        // sqaure stuff
-        uint32_t m_phase = 0;
-        bool m_square = false;
-        float playSquareWave(uint32_t time)
-        {
-            while (m_phase < time)
-            {
-                m_phase += m_period;
-                m_square = !m_square;
-            }
-
-            //return (float)(m_phase - time) / (float)m_period;
-            return m_square ? 1.0f : -1.0f;
-        }
-
-        void press(uint32_t time, unsigned char note, unsigned char velocity)
-        {
-            if(velocity>0)
-            {
-                m_envelope=ATTACK;
-                m_time = 0;
-                m_note = note;
-                m_velocity = velocity;
-                m_phase = time;
-                m_period = (uint32_t)(m_sample_rate / NoteToFreq(note))/2;
-            }
-            else
-            {
-                release(time, note, velocity);
-            }
-        }
-
-        void release(uint32_t time, unsigned char note, unsigned char velocity)
-        {
-            switch(m_envelope)
-            {
-                case ATTACK:
-                case DECAY:
-                    m_envelope=RELEASE;
-                    break;
-                case SUSTAIN:
-                    m_envelope=RELEASE;
-                    break;
-            }
-            m_time = 0;
-        }
-
-        float render(uint32_t time)
-        {
-            if (m_note <=0)
-                return 0;
-            
-            uint32_t attackDuration  = m_sample_rate * 0.01f;
-            uint32_t decayDuration   = m_sample_rate * 0.1f;
-            uint32_t sustainDuration = m_sample_rate * 0.5f;
-            uint32_t releaseDuration = m_sample_rate * 0.2f;
-
-            float vol = 0.0;
-
-            switch(m_envelope)
-            {
-                case ATTACK:
-                    if (m_time<=attackDuration)
-                    {
-                        vol = (float)m_time / (float)attackDuration;
-                        break;
-                    }
-                    m_envelope = DECAY;
-                    m_time = 0;
-
-                case DECAY:
-                    if (m_time <= decayDuration)
-                    {
-                        float t = (float)m_time / (float)decayDuration;
-                        vol =  0.5f + 0.5f*(1-t);                    
-                        break;
-                    }
-                    m_envelope = SUSTAIN;
-                    m_time = 0;
-
-                case SUSTAIN:
-                    if (m_time <= sustainDuration)
-                    {
-                        vol = 0.5f;                    
-                        break;
-                    }
-                    m_envelope = RELEASE;
-                    m_time = 0;
-
-                case RELEASE:
-                    if (m_time <= releaseDuration)
-                    {
-                        float t = ((float)m_time / (float)releaseDuration);                        
-                        vol = 0.5f*(1-t);
-                        break;
-                    }
-                    m_envelope = OFF;
-                    m_time = 0;
-
-                case OFF:
-                    m_note = 0;
-                    return 0.0;
-            }
-
-            m_time++;
-            return playSquareWave(time) * vol * (m_velocity/127.0f);
-        }
-    };
 
     Channel m_channel[20];
     uint32_t m_sample_rate;
@@ -165,7 +199,9 @@ public:
         m_sample_rate = sample_rate;
 
         for (int i = 0; i < _countof(m_channel); i++)
-        m_channel[i].m_sample_rate = sample_rate;
+        {
+            m_channel[i].set_sample_rate(sample_rate);
+        }
 
         m_time = 0;
     }
@@ -256,10 +292,6 @@ public:
             uint8_t key = pdata[1];
             uint8_t speed = pdata[2];
 
-            //if (channel==9)
-            //    return;
-            //printf("%i %i, %i %i\n", subType, channel, key, speed);
-
             if (subType == 8)
             {
                 release(m_omni ? channel : -1, key, speed);
@@ -296,7 +328,7 @@ public:
             m_channel[channel].m_period = (uint32_t)(m_sample_rate/ freq) / 2;
 
             //m_channel[channel].m_note += pitch_bend;
-            printf("pitch bend %i: %i\n", channel, pitch_wheel);
+            LOG("pitch bend %i: %i\n", channel, pitch_wheel);
             return;
 
         }
@@ -304,34 +336,24 @@ public:
 
     void render_samples(int n_samples, float* pOut)
     {
-        int channels = 2;
+        const int channels = 2;
 
         for (int i = 0; i < n_samples; i++)
         {
             float val = synthesize();
+
+            if (m_mute)
+                val = 0.0f;
+
             for (unsigned short j = 0; j < channels; j++)
             {
                 *pOut++ += val;
             }
         }
     }
-
-    void printKeyboard()
-    {
-        char keyboard[128+1];
-        for (int i = 0; i < 128; i++)
-            keyboard[i] = '.';
-        keyboard[128] = 0;
-
-        for (int t = 0; t < _countof(m_channel); t++)
-            if (m_channel[t].m_envelope != Channel::OFF )
-                keyboard[m_channel[t].m_note] = '#';
-
-        printf("%s\n", keyboard);
-    }
 };
 
-Instrument *GetPiano()
+Instrument *GetNewPiano()
 {
     return new Piano(48000);
 }

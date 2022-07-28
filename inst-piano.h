@@ -1,3 +1,3 @@
 #include "instrument.h"
 
-Instrument *GetPiano();
+Instrument *GetNewPiano();
