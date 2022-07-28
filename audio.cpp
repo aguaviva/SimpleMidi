@@ -5,6 +5,8 @@
 
 #include "audio.h"
 
+#define MIN(a,b) (a<b?a:b)
+
 #if _WIN32
 
 #include <windows.h>
@@ -133,7 +135,7 @@ void playLoop(float nSeconds, uint32_t  samplesPerSecond, audio_callback func)
                                   channels,
                                   samplesPerSecond,
                                   0,
-                                  4096*4
+                                  (uint32_t)(nSeconds*1000000.0f)
                                   )) < 0) 
     {   
         printf("Playback open error: %s\n", snd_strerror(err)); 
@@ -152,6 +154,10 @@ void playLoop(float nSeconds, uint32_t  samplesPerSecond, audio_callback func)
                 snd_strerror (err));
         exit (1);
     }
+
+    uint32_t frames_to_render = buffer_size;
+
+    float *pBuf = (float *)malloc(frames_to_render*sizeof(float)*channels);
 
     while (1) 
     {
@@ -174,24 +180,24 @@ void playLoop(float nSeconds, uint32_t  samplesPerSecond, audio_callback func)
             }
         }
 
-        frames_to_deliver = frames_to_deliver > 4096 ? 4096 : frames_to_deliver;
+        frames_to_deliver = MIN(frames_to_render, frames_to_deliver);
 
-        /* deliver the data */
-        float buf[2*4096];
 
-        snd_pcm_sframes_t nframes = func(frames_to_deliver, buf);
+        snd_pcm_sframes_t nframes = func(frames_to_deliver, pBuf);
         if (nframes==0)
         {
             printf("done\n");
             break;
         }
 
-        if ((err = snd_pcm_writei (playback_handle, buf, nframes)) < 0) {
+        if ((err = snd_pcm_writei (playback_handle, pBuf, nframes)) < 0) {
             fprintf (stderr, "write failed (%s)\n", snd_strerror (err));
             break;
         }
     }
     
+    free(pBuf);
+
     snd_pcm_nonblock(playback_handle, 0); // block
     snd_pcm_drain(playback_handle);
     snd_pcm_close(playback_handle);
