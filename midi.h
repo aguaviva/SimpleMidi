@@ -91,7 +91,6 @@ class Midi;
 struct MidiState
 {
     uint32_t m_time = 0;
-    uint32_t m_nextEventTime = 0;
     uint32_t m_ticksPerQuarterNote;  //or ticks per beat
     uint32_t m_midi_ticks_per_metronome_tick = 24;
     uint32_t m_microSecondsPerMidiTick;
@@ -140,6 +139,8 @@ public:
     uint32_t GetTrackCount() { return m_tracks; }
     MidiTrack *GetTrack(uint32_t i) { return m_pTrack[i]; }
     float GetTime();
+    uint32_t sequencer_step(uint32_t time);
+    void render_tracks(uint32_t size, float *pOut);
     size_t RenderMidi(const uint32_t sampleRate, const uint32_t channels, size_t size, float *pOut);
     bool LoadMidi(uint8_t *midi_buffer, size_t midi_buffer_size);
     void Reset();

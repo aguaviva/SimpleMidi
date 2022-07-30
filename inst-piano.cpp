@@ -155,7 +155,6 @@ public:
         }
         else
         {
-            m_adsr.release();
             release(time, note, velocity);
         }
     }
@@ -210,7 +209,7 @@ public:
     {
         if (channelId == -1)
         {
-            for (int i = 0; i < _countof(m_channel); i++)
+            for (uint32_t i = 0; i < _countof(m_channel); i++)
             {
                 if (m_channel[i].m_note == note)
                 {
@@ -234,7 +233,7 @@ public:
     {        
         if (channelId == -1)
         {
-            for (int i = 0; i < _countof(m_channel); i++)
+            for (uint32_t i = 0; i < _countof(m_channel); i++)
             {
                 if (m_channel[i].m_note == note)
                 {
@@ -246,7 +245,7 @@ public:
 
         if (channelId == -1)
         {
-            for (int i = 0; i < _countof(m_channel); i++)
+            for (uint32_t i = 0; i < _countof(m_channel); i++)
             {
                 if (m_channel[i].m_note == 0)
                 {
@@ -270,14 +269,14 @@ public:
     {
         float out = 0;
         
-        for (int i = 0; i < _countof(m_channel); i++) 
+        for (uint32_t i = 0; i < _countof(m_channel); i++) 
         {
             out += m_channel[i].render(m_time);
         }
 
         out /= _countof(m_channel);
 
-        m_time ++;
+        m_time++;
 
         return out;
     }
@@ -334,11 +333,11 @@ public:
         }
     }
 
-    void render_samples(int n_samples, float* pOut)
+    void render_samples(uint32_t n_samples, float* pOut)
     {
-        const int channels = 2;
+        const uint32_t channels = 2;
 
-        for (int i = 0; i < n_samples; i++)
+        for (uint32_t i = 0; i < n_samples; i++)
         {
             float val = synthesize();
 

@@ -252,7 +252,25 @@ Midi::Midi()
     m_tracks = 0;
     m_samples_to_render = 0;
     m_midi_state.m_time = 0;
-    m_midi_state.m_nextEventTime = 0;
+}
+
+uint32_t Midi::sequencer_step(uint32_t time)
+{
+    uint32_t nextEventTime = 0xffffffff;
+    for (uint32_t t = 0; t < m_tracks; t++)
+    {
+        uint32_t next = m_pTrack[t]->play(time);
+        nextEventTime = MIN(next, nextEventTime);
+    }
+    return nextEventTime;
+}
+
+void Midi::render_tracks(uint32_t n_samples, float *pOut)
+{
+    for (uint32_t t = 0; t < m_tracks; t++)
+    {
+        m_pTrack[t]->pPiano->render_samples(n_samples, pOut);
+    }
 }
 
 size_t Midi::RenderMidi(const uint32_t sampleRate, const uint32_t channels, size_t size, float *pOut)
@@ -263,34 +281,27 @@ size_t Midi::RenderMidi(const uint32_t sampleRate, const uint32_t channels, size
     {
         if (m_samples_to_render == 0)
         {
-            m_midi_state.m_time = m_midi_state.m_nextEventTime;
-
-            m_midi_state.m_nextEventTime = 0xffffffff;
-            for (uint32_t t = 0; t < m_tracks; t++)
-            {
-                uint32_t next = m_pTrack[t]->play(m_midi_state.m_time);
-                m_midi_state.m_nextEventTime = MIN(next, m_midi_state.m_nextEventTime);
-            }
-            if (m_midi_state.m_nextEventTime == 0xffffffff)
+            uint32_t nextEventTime = sequencer_step(m_midi_state.m_time);
+            if (nextEventTime == 0xffffffff)
                 break;
 
-            uint32_t interval = m_midi_state.m_nextEventTime-m_midi_state.m_time;
+            uint32_t interval = nextEventTime - m_midi_state.m_time;
 
             LOG("%6i - %4i [%5i]\n", m_midi_state.m_time, interval, m_midi_state.m_microSecondsPerMidiTick);
 
             uint64_t samples_per_midi_tick = ((uint64_t)sampleRate * m_midi_state.m_microSecondsPerMidiTick) / 1000000;
             m_samples_to_render = interval * samples_per_midi_tick;
+
+            m_midi_state.m_time = nextEventTime;
         }
 
         {
-            int n_samples = MIN(size, m_samples_to_render);
-            for (uint32_t t = 0; t < m_tracks; t++)
-            {
-                m_pTrack[t]->pPiano->render_samples((int)n_samples, pOut);
-            }
+            uint32_t n_samples = MIN(size, m_samples_to_render);
+            
+            render_tracks(n_samples, pOut);
+            
             pOut += n_samples * 2;
             size -= n_samples;
-
             m_samples_to_render -= n_samples;
         }
     }
@@ -343,7 +354,6 @@ bool Midi::LoadMidi(uint8_t *midi_buffer, size_t midi_buffer_size)
 void Midi::Reset() 
 {
     m_midi_state.m_time = 0;
-    m_midi_state.m_nextEventTime = 0;
     for (int i=0;i<m_tracks;i++)
         m_pTrack[i]->Reset();
 }
