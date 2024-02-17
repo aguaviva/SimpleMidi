@@ -104,6 +104,8 @@ class MidiTrack : public MidiStream
 {
     uint64_t m_nextTime = 0;
     unsigned char m_lastType = 0;
+    uint64_t m_elapsed_microseconds = 0;
+
 public:
     MidiState *m_pMidiState;
     uint32_t m_channel;
@@ -117,6 +119,8 @@ public:
     MidiTrack(uint8_t *ini, uint8_t*fin, MidiState *pMidiState = NULL);
     void Reset();
     uint32_t play(uint32_t midi_ticks);
+    uint32_t get_elapsed_milliseconds() { return m_elapsed_microseconds/1000; };
+
 };
 
 ///////////////////////////////////////////////////////////////
@@ -130,18 +134,19 @@ class Midi
     uint32_t m_tracks = 0;
     uint32_t m_sample_rate;
     uint32_t m_output_channel_count;
-
-    uint32_t m_samples_to_render;
+    uint32_t m_elapsed_milliseconds;
+    uint32_t m_event_samples_to_render;
 public:
     MidiState m_midi_state;
 
     Midi();
     uint32_t GetTrackCount() { return m_tracks; }
     MidiTrack *GetTrack(uint32_t i) { return m_pTrack[i]; }
-    float GetTime();
+    uint32_t get_elapsed_milliseconds();
     uint32_t sequencer_step(uint32_t time);
     void render_tracks(uint32_t size, float *pOut);
-    size_t RenderMidi(const uint32_t sampleRate, const uint32_t channels, size_t size, float *pOut);
+    size_t step();
+    size_t RenderMidi(const uint32_t sampleRate, size_t size, float *pOut);
     bool LoadMidi(uint8_t *midi_buffer, size_t midi_buffer_size);
     void Reset();
 };

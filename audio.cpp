@@ -80,7 +80,7 @@ MMRESULT playLoop(Midi *pMidi, float nSeconds, uint32_t samplesPerSecond = 48000
             //
             while (buffers_queued < bufferCount)
             {
-                if (pMidi->RenderMidi(waveFormat.nSamplesPerSec, waveFormat.nChannels, buf_hdr[index].dwBufferLength / frameSize, (float*)buf_hdr[index].lpData) == false)
+                if (pMidi->RenderMidi(waveFormat.nSamplesPerSec, buf_hdr[index].dwBufferLength / frameSize, (float*)buf_hdr[index].lpData) == false)
                     break;
                 mmresult = waveOutWrite(hWavOut, &buf_hdr[index], sizeof(buf_hdr[0]));
                 assert(mmresult == MMSYSERR_NOERROR);

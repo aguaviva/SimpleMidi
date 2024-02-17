@@ -10,6 +10,7 @@
 #include <thread>
 #include <map>
 #include <vector>
+#include <string>
 
 #include "audio.h"
 #include "midi.h"
@@ -91,7 +92,7 @@ public:
 float time_ini = 0.0f;
 float time_fin = 10.0f;
 float time_width = 10.0f;
-
+float total_midi_time;
 class drawInst : public Instrument
 {
 public:
@@ -139,7 +140,7 @@ public:
         }        
     }
     virtual void render_samples(uint32_t n_samples, float* pOut) {}
-};            
+};
 
 void GetTimingChanges(Midi *pMidi)
 {
@@ -183,21 +184,22 @@ void draw_track(int t, Midi *pMidi, float global_time, ImVec4 color)
             time += midi.m_midi_state.m_microSecondsPerMidiTick * (midi_ticks - old_time);
         }        
     }
+
     if (I.m_min_key>I.m_max_key)
         return;
-
 
     ImGui::PushID(t);
     ImGui::Checkbox("", &pTrackOrg->pPiano->m_mute); 
     ImGui::SameLine();
+/*
     ImGui::Text("%i %s %s", pTrackOrg->m_channel, pTrackOrg->m_TrackName, pTrackOrg->m_InstrumentName);
     ImGui::SameLine();
     ImGui::Text("time sig: %i/%i", pTrackOrg->m_timesignatureNum, pTrackOrg->m_timesignatureDen);
+*/
     ImGui::PopID();
-
     ImVec2 canvas_p0 = ImGui::GetCursorScreenPos();      // ImDrawList API uses screen coordinates!
     ImVec2 canvas_sz = ImGui::GetContentRegionAvail();   // Resize canvas to what's available
-    canvas_sz.y = 80;
+    canvas_sz.y = 200;
     if (canvas_sz.x < 50.0f) canvas_sz.x = 50.0f;
     if (canvas_sz.y < 50.0f) canvas_sz.y = 50.0f;
     ImVec2 canvas_p1 = ImVec2(canvas_p0.x + canvas_sz.x, canvas_p0.y + canvas_sz.y);
@@ -229,6 +231,9 @@ void draw_track(int t, Midi *pMidi, float global_time, ImVec4 color)
 
     // Draw grid + all lines in the canvas
     draw_list->PushClipRect(canvas_p0, canvas_p1, true);
+    char str[1024];
+    sprintf(str, "%i %s %s", pTrackOrg->m_channel, pTrackOrg->m_TrackName, pTrackOrg->m_InstrumentName);
+    draw_list->AddText(ImVec2(canvas_p0.x+5, canvas_p0.y+5), IM_COL32(200, 200, 200, 1255), str);
     if (opt_enable_grid)
     {
         for (float i = 0; i < m_grid.size(); i++)
@@ -380,15 +385,47 @@ int32_t play_callback(int32_t frames_to_deliver, float *buf)
 
     for (uint32_t i=0;i<frames_to_deliver*2;i++)
         buf[i]=0;
-    return midi.RenderMidi(48000, 2, frames_to_deliver, buf);
+    return midi.RenderMidi(48000, frames_to_deliver, buf);
 }
 
 ///////////////////////////////////////////////////////////////
 // Main function
 ///////////////////////////////////////////////////////////////
+#include <dirent.h>
+
+std::vector<std::string> midi_files;
+
+int get_midi_list(const char *pDir)
+{
+  DIR *dp;
+  struct dirent *ep;     
+  dp = opendir (pDir);
+  if (dp != NULL)
+  {
+    while ((ep = readdir (dp)) != NULL)
+    {
+        std::string str = (ep->d_name);
+        if (str.size()>3)
+        {
+            std::string ext = str.substr(str.size()-4,4);
+            if ( ext == ".mid")
+                midi_files.push_back(str);
+        }
+    }
+          
+    closedir (dp);
+    return 0;
+  }
+  else
+  {
+    perror ("Couldn't open the directory");
+    return -1;
+  }
+}
 
 int main(int argc, char **argv)
 {
+    get_midi_list("../songs");
     //const char *filename = "Mario-Sheet-Music-Overworld-Main-Theme.mid";
     //const char* filename = "slowman.mid";
     //const char *filename = "Theme From San Andreas.mid";
@@ -397,9 +434,9 @@ int main(int argc, char **argv)
     //const char* filename = "Gigi_Dagostino__Lamour_Toujours.mid";
     //const char *filename = "doom.mid";
     //const char *filename = "TakeOnMe.mid";
-    //const char *filename = "Guns n Roses - November Rain.mid";
+    const char *filename = "Guns n Roses - November Rain.mid";
     //const char *filename = "mozart-piano-concerto-21-2-elvira-madigan-piano-solo.mid";
-    const char *filename = "John Lennon - Imagine.mid";
+    //const char *filename = "John Lennon - Imagine.mid";
     //const char *filename = "BadRomance.mid";
     //const char* filename = "The Legend of Zelda Ocarina of Time - Song of Storms.mid";
     //const char* filename = "The Legend of Zelda Ocarina of Time - New Ocarina Melody.mid";
@@ -424,7 +461,7 @@ int main(int argc, char **argv)
     {
         filename = argv[1];
     }
-
+ 
     size_t midi_size;
     uint8_t* pMidi_buffer;
     char path[256];
@@ -436,6 +473,12 @@ int main(int argc, char **argv)
 
     if (midi.LoadMidi(pMidi_buffer, midi_size) == false)
         return 0;
+
+    //measure midi length
+    while(midi.step()>0) {}
+    total_midi_time = midi.get_elapsed_milliseconds()/1000.0f;
+    printf("midi length: %f s\n", total_midi_time);
+    midi.Reset();
 
     for (uint32_t t = 0; t < midi.GetTrackCount(); t++)
     {

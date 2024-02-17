@@ -32,6 +32,7 @@ void MidiTrack::Reset()
     m_TrackName = "none";
     m_InstrumentName = "none";
     m_status = 0;
+    m_elapsed_microseconds = 0;
 }
 
 uint32_t MidiTrack::play(uint32_t midi_ticks)
@@ -250,8 +251,7 @@ uint32_t MidiTrack::play(uint32_t midi_ticks)
 Midi::Midi()
 {
     m_tracks = 0;
-    m_samples_to_render = 0;
-    m_midi_state.m_time = 0;
+    Reset();
 }
 
 uint32_t Midi::sequencer_step(uint32_t time)
@@ -273,45 +273,59 @@ void Midi::render_tracks(uint32_t n_samples, float *pOut)
     }
 }
 
-size_t Midi::RenderMidi(const uint32_t sampleRate, const uint32_t channels, size_t size, float *pOut)
+size_t Midi::step()
+{
+    uint32_t nextEventTime = sequencer_step(m_midi_state.m_time);
+    if (nextEventTime == 0xffffffff)
+        return 0;
+
+    uint32_t interval = nextEventTime - m_midi_state.m_time;
+
+    LOG("%6i - %4i [%5i]\n", m_midi_state.m_time, interval, m_midi_state.m_microSecondsPerMidiTick);
+
+    m_elapsed_milliseconds += interval * m_midi_state.m_microSecondsPerMidiTick / 1000;
+
+    m_midi_state.m_time = nextEventTime;
+
+    return interval;
+}
+
+size_t Midi::RenderMidi(const uint32_t sampleRate, size_t size, float *pOut)
 {
     size_t size_org = size;
 
     while (size>0)
     {
-        if (m_samples_to_render == 0)
+        if (m_event_samples_to_render == 0)
         {
-            uint32_t nextEventTime = sequencer_step(m_midi_state.m_time);
-            if (nextEventTime == 0xffffffff)
+            uint32_t interval = step();
+            if (interval == 0)
                 break;
 
-            uint32_t interval = nextEventTime - m_midi_state.m_time;
-
-            LOG("%6i - %4i [%5i]\n", m_midi_state.m_time, interval, m_midi_state.m_microSecondsPerMidiTick);
-
             uint64_t samples_per_midi_tick = ((uint64_t)sampleRate * m_midi_state.m_microSecondsPerMidiTick) / 1000000;
-            m_samples_to_render = interval * samples_per_midi_tick;
-
-            m_midi_state.m_time = nextEventTime;
+            m_event_samples_to_render = interval * samples_per_midi_tick;
         }
 
         {
-            uint32_t n_samples = MIN(size, m_samples_to_render);
+            uint32_t n_samples = MIN(size, m_event_samples_to_render);
             
-            render_tracks(n_samples, pOut);
-            
-            pOut += n_samples * 2;
+            if (pOut!=NULL)
+            {
+                render_tracks(n_samples, pOut);            
+                pOut += n_samples * 2;
+            }
+
             size -= n_samples;
-            m_samples_to_render -= n_samples;
+            m_event_samples_to_render -= n_samples;
         }
     }
 
     return size_org - size;
 }
 
-float Midi::GetTime()
+uint32_t Midi::get_elapsed_milliseconds()
 {
-    return (((uint64_t)m_midi_state.m_time) * m_midi_state.m_microSecondsPerMidiTick) / 1000000.0f;
+    return m_elapsed_milliseconds;
 }
 
 bool Midi::LoadMidi(uint8_t *midi_buffer, size_t midi_buffer_size)
@@ -353,7 +367,10 @@ bool Midi::LoadMidi(uint8_t *midi_buffer, size_t midi_buffer_size)
 
 void Midi::Reset() 
 {
+    m_event_samples_to_render = 0;
+    m_elapsed_milliseconds = 0;
     m_midi_state.m_time = 0;
+
     for (int i=0;i<m_tracks;i++)
         m_pTrack[i]->Reset();
 }
