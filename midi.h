@@ -136,7 +136,7 @@ class Midi
     uint32_t m_tracks = 0;
     uint32_t m_sample_rate;
     uint32_t m_output_channel_count;
-    uint32_t m_elapsed_milliseconds;
+    uint32_t m_elapsed_microseconds;
     uint32_t m_event_samples_to_render;
 public:
     MidiState m_midi_state;

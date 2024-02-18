@@ -232,7 +232,7 @@ uint32_t MidiTrack::play(uint32_t midi_ticks)
 
         if (done())
         {
-            m_nextTime = 0xffffffff;
+            m_nextTime = NO_EVENTS;
             break;
         }
 
@@ -287,9 +287,11 @@ size_t Midi::step()
 
     LOG("%6i - %4i [%5i]\n", m_midi_state.m_time, interval, m_midi_state.m_microSecondsPerMidiTick);
 
-    m_elapsed_milliseconds += interval * m_midi_state.m_microSecondsPerMidiTick / 1000;
+    uint64_t microseconds_to_render = ((uint64_t)interval * m_midi_state.m_microSecondsPerMidiTick);
 
-    return interval;
+    m_elapsed_microseconds += microseconds_to_render;
+
+    return microseconds_to_render;
 }
 
 size_t Midi::RenderMidi(const uint32_t sampleRate, size_t size, float *pOut)
@@ -300,12 +302,11 @@ size_t Midi::RenderMidi(const uint32_t sampleRate, size_t size, float *pOut)
     {
         if (m_event_samples_to_render == 0)
         {
-            uint32_t interval = step();
-            if (interval == NO_EVENTS)
+            uint32_t microseconds_to_render = step();
+            if (microseconds_to_render == NO_EVENTS)
                 break;
 
-            uint64_t samples_per_midi_tick = ((uint64_t)sampleRate * m_midi_state.m_microSecondsPerMidiTick) / 1000000;
-            m_event_samples_to_render = interval * samples_per_midi_tick;
+            m_event_samples_to_render = ( sampleRate * microseconds_to_render)/ 1000000;
         }
 
         {
@@ -327,7 +328,7 @@ size_t Midi::RenderMidi(const uint32_t sampleRate, size_t size, float *pOut)
 
 uint32_t Midi::get_elapsed_milliseconds()
 {
-    return m_elapsed_milliseconds;
+    return m_elapsed_microseconds/1000.0f;
 }
 
 bool Midi::LoadMidi(uint8_t *midi_buffer, size_t midi_buffer_size)
@@ -365,8 +366,8 @@ bool Midi::LoadMidi(uint8_t *midi_buffer, size_t midi_buffer_size)
     }
 
     //measure midi length
-    while(step()!=NO_EVENTS) {}
-    float total_midi_time = get_elapsed_milliseconds()/1000.0f;
+    while(step() != NO_EVENTS) {}
+    float total_midi_time = get_elapsed_milliseconds() / 1000.0f;
     printf("midi length: %f s\n", total_midi_time);
     Reset();
 
@@ -376,7 +377,7 @@ bool Midi::LoadMidi(uint8_t *midi_buffer, size_t midi_buffer_size)
 void Midi::Reset() 
 {
     m_event_samples_to_render = 0;
-    m_elapsed_milliseconds = 0;
+    m_elapsed_microseconds = 0;
     m_midi_state.m_time = 0;
 
     for (int i=0;i<m_tracks;i++)

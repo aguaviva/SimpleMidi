@@ -71,8 +71,6 @@ class drawInst : public Instrument
 {
 public:
     std::vector<ImVec2> pos;
-    std::vector<ImU32> col;
-    ImVec4 m_color;
 
     float m_time;
 
@@ -107,7 +105,7 @@ public:
         }        
     }
 
-    void draw(ImDrawList* draw_list, ImVec2 canvas_p0, ImVec2 canvas_p1, float time_ini, float time_fin)
+    void draw(ImDrawList* draw_list, ImVec2 canvas_p0, ImVec2 canvas_p1, float time_ini, float time_fin, ImU32 color)
     {
         for(int i=0;i<pos.size();i+=2)
         {
@@ -123,10 +121,7 @@ public:
             t = unlerp(pos[i+1].x, time_ini, time_fin);
             float x1 = lerp(t, canvas_p0.x, canvas_p1.x);
 
-            draw_list->AddRectFilled(
-                ImVec2(x0, y0), 
-                ImVec2(x1, y1), 
-                IM_COL32(m_color.x*255, m_color.y*255, m_color.z*255, m_color.w*255));
+            draw_list->AddRectFilled(ImVec2(x0, y0), ImVec2(x1, y1), color);
         }
     }    
 
@@ -223,8 +218,7 @@ void draw_track(int t, Midi *pMidi, float global_time, ImVec4 color)
     }
 */
 
-    pInstDraw[t].m_color = color;
-    pInstDraw[t].draw(draw_list, canvas_p0, canvas_p1, time_ini, time_fin);
+    pInstDraw[t].draw(draw_list, canvas_p0, canvas_p1, time_ini, time_fin, IM_COL32(color.x*255, color.y*255, color.z*255, color.w*255));
 
     {
         float t = unlerp(global_time, time_ini, time_fin);                      
@@ -240,6 +234,8 @@ void draw_track(int t, Midi *pMidi, float global_time, ImVec4 color)
 
 std::vector<std::string> midi_files;
 
+size_t total_rendered_samples = 0;
+
 bool bExit = true;
 int32_t play_callback(int32_t frames_to_deliver, const void *object, float *buf)
 {
@@ -249,7 +245,11 @@ int32_t play_callback(int32_t frames_to_deliver, const void *object, float *buf)
     for (uint32_t i=0;i<frames_to_deliver*2;i++)
         buf[i]=0;
 
-    return ((Midi*)object)->RenderMidi(48000, frames_to_deliver, buf);
+    size_t rendered_samples =  ((Midi*)object)->RenderMidi(48000, frames_to_deliver, buf);
+
+    total_rendered_samples += rendered_samples;
+
+    return rendered_samples;    
 }
 
 class MidiPlayer
@@ -297,7 +297,7 @@ class MidiPlayer
         {
             bExit = false;
             const void *pData = (void *)&midi;
-            std::thread t1(playLoop, 0.2f, 48000, pData, play_callback);
+            std::thread t1(playLoop, 0.1f, 48000, pData, play_callback);
             m_thread.swap(t1);
         }
     }
@@ -320,7 +320,6 @@ ImVec4 saved_palette[32] = {};
 
 void doui(GLFWwindow* window)
 {
-    static float time = 0;
     Midi *pMidi = &midi_player.midi;
 
     ImGui::Begin("Hello, world!");                          // Create a window called "Hello, world!" and append into it.
@@ -349,7 +348,7 @@ void doui(GLFWwindow* window)
         sprintf(path, "../songs/%s", current_midi);
         midi_player.load(path);
         midi_player.play();
-        time = 0;
+        total_rendered_samples = 0;
     }
 
     ImGui::Text("Application average %.3f ms/frame (%.1f FPS)", 1000.0f / ImGui::GetIO().Framerate, ImGui::GetIO().Framerate);
@@ -357,7 +356,7 @@ void doui(GLFWwindow* window)
     ImGui::Text("m_microSecondsPerMidiTick = %d", pMidi->m_midi_state.m_microSecondsPerMidiTick);
     ImGui::Text("ms per quarter note = %d", pMidi->m_midi_state.m_microSecondsPerMidiTick * pMidi->m_midi_state.m_ticksPerQuarterNote);
 
-    time += ImGui::GetIO().DeltaTime;
+    float time = total_rendered_samples / 48000.0f;
 
     if (time>2.0f)
     {
