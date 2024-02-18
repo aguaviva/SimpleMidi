@@ -43,7 +43,7 @@ uint32_t MidiTrack::play(uint32_t midi_ticks)
 
     // are we done with the stream?
     if (done() == true)
-        return 0xffffffff;
+        return NO_EVENTS;
 
     //process all events for this instant and compute m_nextTime
     for (;;)
@@ -231,7 +231,10 @@ uint32_t MidiTrack::play(uint32_t midi_ticks)
         }
 
         if (done())
+        {
+            m_nextTime = 0xffffffff;
             break;
+        }
 
         uint32_t deltaMidiTicks = GetVar();
         if (deltaMidiTicks > 0)
@@ -256,7 +259,7 @@ Midi::Midi()
 
 uint32_t Midi::sequencer_step(uint32_t time)
 {
-    uint32_t nextEventTime = 0xffffffff;
+    uint32_t nextEventTime = NO_EVENTS;
     for (uint32_t t = 0; t < m_tracks; t++)
     {
         uint32_t next = m_pTrack[t]->play(time);
@@ -276,16 +279,15 @@ void Midi::render_tracks(uint32_t n_samples, float *pOut)
 size_t Midi::step()
 {
     uint32_t nextEventTime = sequencer_step(m_midi_state.m_time);
-    if (nextEventTime == 0xffffffff)
-        return 0;
+    if (nextEventTime == NO_EVENTS)
+        return nextEventTime;
 
     uint32_t interval = nextEventTime - m_midi_state.m_time;
+    m_midi_state.m_time = nextEventTime;
 
     LOG("%6i - %4i [%5i]\n", m_midi_state.m_time, interval, m_midi_state.m_microSecondsPerMidiTick);
 
     m_elapsed_milliseconds += interval * m_midi_state.m_microSecondsPerMidiTick / 1000;
-
-    m_midi_state.m_time = nextEventTime;
 
     return interval;
 }
@@ -299,7 +301,7 @@ size_t Midi::RenderMidi(const uint32_t sampleRate, size_t size, float *pOut)
         if (m_event_samples_to_render == 0)
         {
             uint32_t interval = step();
-            if (interval == 0)
+            if (interval == NO_EVENTS)
                 break;
 
             uint64_t samples_per_midi_tick = ((uint64_t)sampleRate * m_midi_state.m_microSecondsPerMidiTick) / 1000000;
@@ -361,6 +363,12 @@ bool Midi::LoadMidi(uint8_t *midi_buffer, size_t midi_buffer_size)
             m_tracks++;
         }
     }
+
+    //measure midi length
+    while(step()!=NO_EVENTS) {}
+    float total_midi_time = get_elapsed_milliseconds()/1000.0f;
+    printf("midi length: %f s\n", total_midi_time);
+    Reset();
 
     return true;
 }

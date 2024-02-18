@@ -5,6 +5,8 @@ A one file simple midi player:
 - Plays audio asynchronously
 - Features a square wave synthesizer
 
+![midi screenshot](Screenshot.png)
+
 ## Getting started
 First create the slolution/makefile:
 ```

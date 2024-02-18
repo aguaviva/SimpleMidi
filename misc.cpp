@@ -50,3 +50,35 @@ int map(int i, int ini, int fin, int out_ini, int out_fin)
     float t = unlerp(i, ini, fin);
     return lerp(t, out_ini, out_fin);
 }
+
+#include <dirent.h>
+#include <string>
+#include <vector>
+
+int get_midi_list(const char *pDir, std::vector<std::string> *pMidi_files)
+{
+  DIR *dp;
+  struct dirent *ep;     
+  dp = opendir (pDir);
+  if (dp != NULL)
+  {
+    while ((ep = readdir (dp)) != NULL)
+    {
+        std::string str = (ep->d_name);
+        if (str.size()>3)
+        {
+            std::string ext = str.substr(str.size()-4,4);
+            if ( ext == ".mid")
+                pMidi_files->push_back(str);
+        }
+    }
+          
+    closedir (dp);
+    return 0;
+  }
+  else
+  {
+    perror ("Couldn't open the directory");
+    return -1;
+  }
+}

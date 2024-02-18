@@ -115,7 +115,7 @@ MMRESULT playLoop(Midi *pMidi, float nSeconds, uint32_t samplesPerSecond = 48000
 
 #include <../alsa/asoundlib.h>
 
-void playLoop(float nSeconds, uint32_t  samplesPerSecond, audio_callback func)
+void playLoop(float nSeconds, uint32_t  samplesPerSecond, const void *object, audio_callback func)
 {
     uint32_t channels = 2;
     snd_pcm_t *playback_handle;
@@ -183,7 +183,7 @@ void playLoop(float nSeconds, uint32_t  samplesPerSecond, audio_callback func)
         frames_to_deliver = MIN(frames_to_render, frames_to_deliver);
 
 
-        snd_pcm_sframes_t nframes = func(frames_to_deliver, pBuf);
+        snd_pcm_sframes_t nframes = func(frames_to_deliver, object, pBuf);
         if (nframes==0)
         {
             printf("done\n");
