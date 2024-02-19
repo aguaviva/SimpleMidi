@@ -11,7 +11,6 @@
 #include <map>
 #include <vector>
 #include <string>
-
 #include "audio.h"
 #include "midi.h"
 
@@ -21,6 +20,8 @@
 #include "imgui_impl_glfw.h"
 #include "imgui_impl_opengl3.h"
 #include <GLFW/glfw3.h> // Will drag system OpenGL headers
+
+#define MIDI_FOLDER "./songs"
 
 static void glfw_error_callback(int error, const char* description)
 {
@@ -312,6 +313,7 @@ class MidiPlayer
     }
 };
 
+bool p_open = true;
 MidiPlayer midi_player;
 bool midi_reload = true;
 static const char* current_midi = NULL;
@@ -320,9 +322,10 @@ ImVec4 saved_palette[32] = {};
 
 void doui(GLFWwindow* window)
 {
-    Midi *pMidi = &midi_player.midi;
+    ImGui::SetNextWindowPos(ImVec2(0.0f, 0.0f));
+    ImGui::SetNextWindowSize(ImGui::GetIO().DisplaySize);
 
-    ImGui::Begin("Hello, world!");                          // Create a window called "Hello, world!" and append into it.
+    ImGui::Begin("Hello, world!", &p_open, ImGuiWindowFlags_NoDecoration | ImGuiWindowFlags_NoResize);                          // Create a window called "Hello, world!" and append into it.
 
     static bool midi_reload = true;
     if (ImGui::BeginCombo("##combo", current_midi)) // The second parameter is the label previewed before opening the combo.
@@ -345,16 +348,18 @@ void doui(GLFWwindow* window)
     {
         midi_reload = false;
         char path[256];
-        sprintf(path, "../songs/%s", current_midi);
+        sprintf(path, MIDI_FOLDER"/%s", current_midi);
         midi_player.load(path);
         midi_player.play();
         total_rendered_samples = 0;
     }
 
+    Midi *pMidi = &midi_player.midi;
+
     ImGui::Text("Application average %.3f ms/frame (%.1f FPS)", 1000.0f / ImGui::GetIO().Framerate, ImGui::GetIO().Framerate);
     ImGui::Text("m_ticksPerQuarterNote = %d", pMidi->m_midi_state.m_ticksPerQuarterNote);
     ImGui::Text("m_microSecondsPerMidiTick = %d", pMidi->m_midi_state.m_microSecondsPerMidiTick);
-    ImGui::Text("ms per quarter note = %d", pMidi->m_midi_state.m_microSecondsPerMidiTick * pMidi->m_midi_state.m_ticksPerQuarterNote);
+    ImGui::Text("ms per quarter note = %d", (pMidi->m_midi_state.m_microSecondsPerMidiTick * pMidi->m_midi_state.m_ticksPerQuarterNote));
 
     float time = total_rendered_samples / 48000.0f;
 
@@ -386,7 +391,7 @@ void doui(GLFWwindow* window)
 ///////////////////////////////////////////////////////////////
 int main(int argc, char **argv)
 {
-    get_midi_list("../songs", &midi_files);
+    get_midi_list(MIDI_FOLDER, &midi_files);
     //const char *filename = "Mario-Sheet-Music-Overworld-Main-Theme.mid";
     //const char* filename = "slowman.mid";
     //const char *filename = "Theme From San Andreas.mid";
@@ -418,12 +423,7 @@ int main(int argc, char **argv)
     //const char *filename = "MADONNA.Holiday K.mid";
     //const char *filename = "Ennio_Morricone__Thegoodthebadandtheugly.mid";
 
-    if (argc > 1)
-    {
-        filename = argv[1];
-    }
-
-    current_midi = filename;
+    current_midi = (argc > 1)?argv[1]:filename;
 
     // Generate a default palette. The palette will persist and can be edited.
     for (int n = 0; n < IM_ARRAYSIZE(saved_palette); n++)
