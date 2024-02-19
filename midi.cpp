@@ -302,11 +302,11 @@ size_t Midi::RenderMidi(const uint32_t sampleRate, size_t size, float *pOut)
     {
         if (m_event_samples_to_render == 0)
         {
-            uint32_t microseconds_to_render = step();
+            uint64_t microseconds_to_render = step();
             if (microseconds_to_render == NO_EVENTS)
                 break;
 
-            m_event_samples_to_render = ( sampleRate * microseconds_to_render)/ 1000000;
+            m_event_samples_to_render = ( (uint64_t)sampleRate * microseconds_to_render)/ 1000000;
         }
 
         {
