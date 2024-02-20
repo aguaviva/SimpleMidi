@@ -40,7 +40,21 @@ class ADSR
     Envelope m_envelope = OFF;
     uint32_t m_time = 0;
     uint32_t m_sample_rate = 0;
+
+    // 
+    uint32_t attackDuration;
+    uint32_t decayDuration;
+    uint32_t releaseDuration;
+
 public:
+
+    void set_adr(float attack, float duration, float release)
+    {
+        attackDuration  = m_sample_rate * attack;
+        decayDuration   = m_sample_rate * duration;
+        releaseDuration = m_sample_rate * release;
+    }
+
     void set_sample_rate(uint32_t sample_rate)
     {
         m_sample_rate = sample_rate;
@@ -112,26 +126,18 @@ public:
     }
 };
 
-struct Channel
+class SquareWaveOscillator
 {
     uint32_t m_time=0;
-    uint32_t m_velocity = 0;
     uint32_t m_period = 0;
-    uint8_t m_note = 0;
-    uint32_t m_sample_rate = 0;
-    ADSR m_adsr;
-public:
-    void set_sample_rate(uint32_t sample_rate)
-    {
-        m_sample_rate = sample_rate;
-        m_adsr.set_sample_rate(sample_rate);
-    }
-
-    // sqaure stuff
     uint32_t m_phase = 0;
     bool m_square = false;
-    float playSquareWave(uint32_t time)
+
+public:
+    float render(uint32_t time)
     {
+        m_time++;
+
         while (m_phase < time)
         {
             m_phase += m_period;
@@ -142,16 +148,43 @@ public:
         return m_square ? 1.0f : -1.0f;
     }
 
+    float press(uint32_t time, uint32_t period) 
+    {
+        m_time = 0;
+        m_phase = time;
+        m_period = period;
+    }
+
+    void set_period(uint32_t period)
+    {
+        m_period = period;
+    }
+};
+
+struct Channel
+{
+    SquareWaveOscillator osc;
+    uint32_t m_velocity = 0;
+    uint8_t m_note = 0;
+    uint32_t m_sample_rate = 0;
+    
+public:
+    ADSR m_adsr;
+
+    void set_sample_rate(uint32_t sample_rate)
+    {
+        m_sample_rate = sample_rate;
+        m_adsr.set_sample_rate(sample_rate);
+    }
+
     void press(uint32_t time, unsigned char note, unsigned char velocity)
     {
         if(velocity>0)
         {
             m_adsr.press();
-            m_time = 0;
             m_note = note;
             m_velocity = velocity;
-            m_phase = time;
-            m_period = (uint32_t)(m_sample_rate / NoteToFreq(note))/2;
+            osc.press(time, (uint32_t)(m_sample_rate / NoteToFreq(note))/2);
         }
         else
         {
@@ -176,9 +209,7 @@ public:
             return 0;
         }
 
-        m_time++;
-
-        return playSquareWave(time) * vol * (m_velocity/127.0f);
+        return osc.render(time) * vol * (m_velocity/127.0f);
     }
 };
 
@@ -200,6 +231,7 @@ public:
         for (int i = 0; i < _countof(m_channel); i++)
         {
             m_channel[i].set_sample_rate(sample_rate);
+            m_channel[i].m_adsr.set_adr(0.01f, 0.1f, 0.2f);
         }
 
         m_time = 0;
@@ -324,7 +356,7 @@ public:
             int32_t note = m_channel[channel].m_note;
             float freq = NoteToFreqFrac((float)note + 10.0 * t);
 
-            m_channel[channel].m_period = (uint32_t)(m_sample_rate/ freq) / 2;
+            m_channel[channel].osc.set_period( (uint32_t)(m_sample_rate/ freq) / 2);
 
             //m_channel[channel].m_note += pitch_bend;
             LOG("pitch bend %i: %i\n", channel, pitch_wheel);
