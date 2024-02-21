@@ -80,7 +80,7 @@ uint32_t MidiTrack::play(uint32_t midi_ticks)
                     LOG("    %s: ", ChunkType[metaType - 1]);
                     for (int i = 0; i < length; i++)
                     {
-                        char c = GetByte()
+                        char c = GetByte();
                         LOG("%c", c);
                     }
                     LOG("\n");
@@ -91,7 +91,7 @@ uint32_t MidiTrack::play(uint32_t midi_ticks)
 
                     for (int i = 0; i < length; i++)
                     {
-                        char c = GetByte()
+                        char c = GetByte();
                         LOG("%c", c);
                     }
                     LOG("\n");
@@ -155,7 +155,7 @@ uint32_t MidiTrack::play(uint32_t midi_ticks)
                     LOG(" sequencer specific");
                     for (int i = 0; i < length; i++)
                     {
-                        char c = GetByte()
+                        char c = GetByte();
                         LOG("%02x ", c);
                     }
                     LOG("\n");
@@ -206,7 +206,17 @@ uint32_t MidiTrack::play(uint32_t midi_ticks)
                 if (pPiano!=NULL) 
                     pPiano->send_midi(data, 3);
             }
-            else if (subType == 0xC || subType == 0xD) // channel pressure
+            else if (subType == 0xC) // set program
+            {
+                unsigned char program = GetByte();
+
+                uint8_t data[2] = { m_status , program };
+                //LOG(" %s: program %i: %i\n", m_TrackName, channel, program);
+
+                if (pPiano!=NULL) 
+                    pPiano->send_midi(data, 2);
+            }
+            else if (subType == 0xD) // channel pressure
             {
                 unsigned char cc = GetByte();
 
@@ -251,13 +261,13 @@ uint32_t MidiTrack::play(uint32_t midi_ticks)
 ///////////////////////////////////////////////////////////////
 // Midi
 ///////////////////////////////////////////////////////////////
-Midi::Midi()
+MidiSong::MidiSong()
 {
     m_tracks = 0;
     Reset();
 }
 
-uint32_t Midi::sequencer_step(uint32_t time)
+uint32_t MidiSong::sequencer_step(uint32_t time)
 {
     uint32_t nextEventTime = NO_EVENTS;
     for (uint32_t t = 0; t < m_tracks; t++)
@@ -268,7 +278,7 @@ uint32_t Midi::sequencer_step(uint32_t time)
     return nextEventTime;
 }
 
-void Midi::render_tracks(uint32_t n_samples, float *pOut)
+void MidiSong::render_tracks(uint32_t n_samples, float *pOut)
 {
     for (uint32_t t = 0; t < m_tracks; t++)
     {
@@ -276,7 +286,7 @@ void Midi::render_tracks(uint32_t n_samples, float *pOut)
     }
 }
 
-size_t Midi::step()
+size_t MidiSong::step()
 {
     uint32_t nextEventTime = sequencer_step(m_midi_state.m_time);
     if (nextEventTime == NO_EVENTS)
@@ -285,7 +295,7 @@ size_t Midi::step()
     uint32_t interval = nextEventTime - m_midi_state.m_time;
     m_midi_state.m_time = nextEventTime;
 
-    LOG("%6i - %4i [%5i]\n", m_midi_state.m_time, interval, m_midi_state.m_microSecondsPerMidiTick);
+    //LOG("%6i - %4i [%5i]\n", m_midi_state.m_time, interval, m_midi_state.m_microSecondsPerMidiTick);
 
     uint64_t microseconds_to_render = ((uint64_t)interval * m_midi_state.m_microSecondsPerMidiTick);
 
@@ -294,7 +304,7 @@ size_t Midi::step()
     return microseconds_to_render;
 }
 
-size_t Midi::RenderMidi(const uint32_t sampleRate, size_t size, float *pOut)
+size_t MidiSong::RenderMidi(const uint32_t sampleRate, size_t size, float *pOut)
 {
     size_t size_org = size;
 
@@ -326,12 +336,12 @@ size_t Midi::RenderMidi(const uint32_t sampleRate, size_t size, float *pOut)
     return size_org - size;
 }
 
-uint32_t Midi::get_elapsed_milliseconds()
+uint32_t MidiSong::get_elapsed_milliseconds()
 {
     return m_elapsed_microseconds/1000.0f;
 }
 
-bool Midi::LoadMidi(uint8_t *midi_buffer, size_t midi_buffer_size)
+bool MidiSong::LoadMidi(uint8_t *midi_buffer, size_t midi_buffer_size)
 {
     MidiStream ch(midi_buffer, midi_buffer + midi_buffer_size);
 
@@ -374,7 +384,7 @@ bool Midi::LoadMidi(uint8_t *midi_buffer, size_t midi_buffer_size)
     return true;
 }
 
-void Midi::Reset() 
+void MidiSong::Reset() 
 {
     m_event_samples_to_render = 0;
     m_elapsed_microseconds = 0;

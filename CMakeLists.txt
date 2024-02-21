@@ -9,11 +9,22 @@ find_package(imgui CONFIG REQUIRED)
 
 find_package(glfw3 CONFIG REQUIRED)
 
-include(CTest)
-enable_testing()
+set(msfa_found OFF)
 
-add_executable(SimpleMidi SimpleMidi.cpp inst-piano.cpp audio.cpp misc.cpp midi.cpp)
-target_link_libraries(SimpleMidi PRIVATE OpenGL glfw imgui::imgui)
+set(source_files SimpleMidi.cpp inst-piano.cpp audio.cpp misc.cpp midi.cpp)
+set(libraries OpenGL glfw imgui::imgui)
+
+if (${msfa_found})
+  message(STATUS "MSFA found!")
+  add_subdirectory(msfa)
+  list(APPEND source_files inst-dx7.cpp)
+  list(APPEND libraries DX7)
+  add_compile_definitions(MSFA_FOUND)
+endif()
+
+add_executable(SimpleMidi ${source_files})
+target_link_libraries(SimpleMidi PRIVATE  ${libraries})
+
 
 if (${UNIX})
     # *nix-specific includes or actions

@@ -74,10 +74,6 @@ public:
 
     float render(uint32_t time2)
     {
-        uint32_t attackDuration  = m_sample_rate * 0.01f;
-        uint32_t decayDuration   = m_sample_rate * 0.1f;
-        uint32_t releaseDuration = m_sample_rate * 0.2f;
-
         float vol = 0.0;
         m_time++;
 
@@ -148,7 +144,7 @@ public:
         return m_square ? 1.0f : -1.0f;
     }
 
-    float press(uint32_t time, uint32_t period) 
+    void press(uint32_t time, uint32_t period) 
     {
         m_time = 0;
         m_phase = time;
@@ -229,12 +225,19 @@ public:
         m_sample_rate = sample_rate;
 
         for (int i = 0; i < _countof(m_channel); i++)
-        {
-            m_channel[i].set_sample_rate(sample_rate);
-            m_channel[i].m_adsr.set_adr(0.01f, 0.1f, 0.2f);
-        }
+            m_channel[i].set_sample_rate(sample_rate);            
+
+        set_adsr(0.01f, 0.1f, 0.2f);
 
         m_time = 0;
+    }
+
+    void set_adsr(float attack, float duration, float release)
+    {
+        for (int i = 0; i < _countof(m_channel); i++)
+        {
+            m_channel[i].m_adsr.set_adr(0.01f, 0.1f, 0.2f);
+        }
     }
 
     int release(char channelId, unsigned char note, unsigned char velocity)

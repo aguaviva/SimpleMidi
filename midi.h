@@ -88,7 +88,7 @@ public:
     }
 };
 
-class Midi;
+class MidiSong;
 
 struct MidiState
 {
@@ -130,7 +130,7 @@ public:
 ///////////////////////////////////////////////////////////////
 
 
-class Midi
+class MidiSong
 {
     MidiTrack *m_pTrack[50];
     uint32_t m_tracks = 0;
@@ -141,7 +141,7 @@ class Midi
 public:
     MidiState m_midi_state;
 
-    Midi();
+    MidiSong();
     uint32_t GetTrackCount() { return m_tracks; }
     MidiTrack *GetTrack(uint32_t i) { return m_pTrack[i]; }
     uint32_t get_elapsed_milliseconds();
