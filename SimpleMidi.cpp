@@ -87,16 +87,18 @@ public:
 
 std::vector<float> ticks;
 
-void create_piano_roll(MidiSong *pMidi, drawInst **pO)
+void create_piano_roll(MidiSong *pMidi)
 {
     drawInst *pI = new drawInst[pMidi->GetTrackCount()];
 
     for (uint32_t t = 0; t < pMidi->GetTrackCount(); t++)
     {
         pMidi->GetTrack(t)->pPiano = &pI[t];
+        pMidi->GetTrack(t)->set_private_data(&pI[t]);
     }
 
     pMidi->Reset();
+
     while(pMidi->step()!=NO_EVENTS) 
     {
         for(int i=0;i<pMidi->GetTrackCount();i++)
@@ -113,8 +115,6 @@ void create_piano_roll(MidiSong *pMidi, drawInst **pO)
     }
 
     pMidi->Reset();
-
-    *pO = pI;
 }
 
 std::vector<std::string> midi_files;
@@ -137,7 +137,6 @@ int32_t play_callback(int32_t frames_to_deliver, const void *object, float *buf)
     return rendered_samples;    
 }
 
-drawInst *pInstDraw;
 int inst[20];
 class MidiPlayer
 {
@@ -206,23 +205,25 @@ static const char* current_midi = NULL;
 
 void draw_track(int t, MidiSong *pMidi, float time_ini, float time_fin, float global_time, ImVec4 color)
 {
-    if (pInstDraw[t].pos.size()==0)
+    MidiTrack *pTrack = pMidi->GetTrack(t);
+    drawInst *pInstDraw = (drawInst *)(pTrack->get_private_data());
+
+    if (pInstDraw->pos.size()==0)
         return;
 
+#ifdef MSFA_FOUND            
+    //allows changing instrument
     ImGui::PushID(t);
     if (ImGui::SliderInt("instrument", &inst[t], 0,31))
     {
         uint8_t data[2] = { 0xc0 , (uint8_t)inst[t] };
-        pMidi->GetTrack(t)->pPiano->send_midi(data, 2);
+        pTrack->pPiano->send_midi(data, 2);
     }
-    ImGui::Checkbox("", &(pMidi->GetTrack(t)->pPiano->m_mute)); 
+    ImGui::Checkbox("", &pTrack->pPiano->m_mute)); 
     ImGui::SameLine();
-/*
-    ImGui::Text("%i %s %s", pTrackOrg->m_channel, pTrackOrg->m_TrackName, pTrackOrg->m_InstrumentName);
-    ImGui::SameLine();
-    ImGui::Text("time sig: %i/%i", pTrackOrg->m_timesignatureNum, pTrackOrg->m_timesignatureDen);
-*/
-    ImGui::PopID();
+#endif
+
+    ImGui::Text("%i %s %s", t, pTrack->m_InstrumentName, pTrack->m_TrackName);
     ImVec2 canvas_p0 = ImGui::GetCursorScreenPos();      // ImDrawList API uses screen coordinates!
     ImVec2 canvas_sz = ImGui::GetContentRegionAvail();   // Resize canvas to what's available
     canvas_sz.y = 200;
@@ -272,9 +273,8 @@ void draw_track(int t, MidiSong *pMidi, float time_ini, float time_fin, float gl
             draw_list->AddLine(ImVec2(x, canvas_p0.y), ImVec2(x, canvas_p1.y), IM_COL32(200, 200, 200, 40));
         }
     }
-
-
-    pInstDraw[t].draw(draw_list, canvas_p0, canvas_p1, time_ini, time_fin, IM_COL32(color.x*255, color.y*255, color.z*255, color.w*255));
+    
+    pInstDraw->draw(draw_list, canvas_p0, canvas_p1, time_ini, time_fin, IM_COL32(color.x*255, color.y*255, color.z*255, color.w*255));
 
     {
         float t = unlerp(global_time, time_ini, time_fin);                      
@@ -325,7 +325,7 @@ void doui(GLFWwindow* window)
         total_rendered_samples = 0;
 
         //calculate piano rolls
-        create_piano_roll(&midi_player.midi, &pInstDraw);
+        create_piano_roll(&midi_player.midi);
 
         midi_player.set_instruments();
         midi_player.play();
@@ -365,28 +365,6 @@ void doui(GLFWwindow* window)
     {
         midi_player.play();
     }
-
-    static bool key_status[64] = {};
-    for (uint8_t i=0;i<64;i++)
-    {
-        char c[5];
-        sprintf(c, "k%i",i);
-        ImGui::Button(c);
-        if (ImGui::IsItemClicked(ImGuiMouseButton_Left))
-        {
-            if (key_status[i] == false) {
-            uint8_t data[3] = { 0x90 , (uint8_t)(i+48), 0x80 };
-            midi_player.midi.GetTrack(0)->pPiano->send_midi(data, 3);
-            key_status[i] = true;
-            }
-        } else if (key_status[i] == true) {
-            uint8_t data[3] = { 0x80 , (uint8_t)(i+48), 0x80 };
-            midi_player.midi.GetTrack(0)->pPiano->send_midi(data, 3);
-            key_status[i] = false;
-        }
-        ImGui::SameLine();
-    }
-
 
     ImGui::SliderFloat("time_width", &time_width, 0.0f, 120.0f);            // Edit 1 float using a slider from 0.0f to 1.0f
 

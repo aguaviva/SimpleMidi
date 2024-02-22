@@ -107,7 +107,7 @@ class MidiTrack : public MidiStream
     uint64_t m_nextTime = 0;
     unsigned char m_lastType = 0;
     uint64_t m_elapsed_microseconds = 0;
-
+    void *m_pPrivateData;
 public:
     MidiState *m_pMidiState;
     uint32_t m_channel;
@@ -122,7 +122,8 @@ public:
     void Reset();
     uint32_t play(uint32_t midi_ticks);
     uint32_t get_elapsed_milliseconds() { return m_elapsed_microseconds/1000; };
-
+    void set_private_data(void *pData) { m_pPrivateData = pData; }
+    void *get_private_data() { return m_pPrivateData; }
 };
 
 ///////////////////////////////////////////////////////////////
