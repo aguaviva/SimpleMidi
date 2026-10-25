@@ -22,7 +22,6 @@ Instrument *GetDX7(char *pFilename_bank);
 #include "imgui_impl_opengl3.h"
 #include <GLFW/glfw3.h> // Will drag system OpenGL headers
 
-#define MIDI_FOLDER "./songs"
 
 class drawInst : public Instrument
 {
@@ -69,14 +68,14 @@ public:
             float t;
 
             t = unlerp(pos[i+0].y, (float)m_min_key, (float)m_max_key);
-            float y0 = lerp(t, canvas_p1.y, canvas_p0.y);
+            float y0 = lerp(canvas_p1.y, canvas_p0.y, t);
             t = unlerp(pos[i+1].y, (float)m_min_key, (float)m_max_key);
-            float y1 = lerp(t, canvas_p1.y, canvas_p0.y);
+            float y1 = lerp(canvas_p1.y, canvas_p0.y, t);
 
             t = unlerp(pos[i+0].x, time_ini, time_fin);
-            float x0 = lerp(t, canvas_p0.x, canvas_p1.x);
+            float x0 = lerp(canvas_p0.x, canvas_p1.x, t);
             t = unlerp(pos[i+1].x, time_ini, time_fin);
-            float x1 = lerp(t, canvas_p0.x, canvas_p1.x);
+            float x1 = lerp(canvas_p0.x, canvas_p1.x, t);
 
             draw_list->AddRectFilled(ImVec2(x0, y0), ImVec2(x1, y1), color);
         }
@@ -200,7 +199,7 @@ class MidiPlayer
 };
 
 MidiPlayer midi_player;
-bool midi_reload = true;
+bool midi_reload = false;
 static const char* current_midi = NULL;
 
 void draw_track(int t, MidiSong *pMidi, float time_ini, float time_fin, float global_time, ImVec4 color)
@@ -269,7 +268,7 @@ void draw_track(int t, MidiSong *pMidi, float time_ini, float time_fin, float gl
         for (float i = 0; i < ticks.size(); i++)
         {
             float t = unlerp(ticks[i], time_ini, time_fin);            
-            float x = lerp(t, canvas_p0.x, canvas_p1.x);
+            float x = lerp(canvas_p0.x, canvas_p1.x, t);
             draw_list->AddLine(ImVec2(x, canvas_p0.y), ImVec2(x, canvas_p1.y), IM_COL32(200, 200, 200, 40));
         }
     }
@@ -278,7 +277,7 @@ void draw_track(int t, MidiSong *pMidi, float time_ini, float time_fin, float gl
 
     {
         float t = unlerp(global_time, time_ini, time_fin);                      
-        float x = lerp(t, canvas_p0.x, canvas_p1.x);
+        float x = lerp(canvas_p0.x, canvas_p1.x, t);
         draw_list->AddLine(
             ImVec2(x, canvas_p0.y),
             ImVec2(x, canvas_p1.y),
@@ -290,6 +289,7 @@ void draw_track(int t, MidiSong *pMidi, float time_ini, float time_fin, float gl
 
 ImVec4 saved_palette[32] = {};
 float time_width = 10.0f;
+const char *midi_folder = ".";
 
 void doui(GLFWwindow* window)
 {
@@ -299,7 +299,7 @@ void doui(GLFWwindow* window)
     static bool p_open = true;
     ImGui::Begin("Hello, world!", &p_open, ImGuiWindowFlags_NoDecoration | ImGuiWindowFlags_NoResize);                          // Create a window called "Hello, world!" and append into it.
 
-    static bool midi_reload = true;
+    static bool midi_reload = false;
     if (ImGui::BeginCombo("##combo", current_midi)) // The second parameter is the label previewed before opening the combo.
     {
         for (int n = 0; n < midi_files.size(); n++)
@@ -320,7 +320,8 @@ void doui(GLFWwindow* window)
     {
         midi_reload = false;
         char path[256];
-        sprintf(path, MIDI_FOLDER"/%s", current_midi);
+        sprintf(path, "%s/%s", midi_folder, current_midi);
+	printf("attempting to load %s\n", path);
         midi_player.load(path);
         total_rendered_samples = 0;
 
@@ -422,40 +423,26 @@ GLFWwindow* initui()
 
 int main(int argc, char **argv)
 {
-    get_midi_list(MIDI_FOLDER, &midi_files);
-    //const char *filename = "Mario-Sheet-Music-Overworld-Main-Theme.mid";
-    //const char* filename = "slowman.mid";
-    //const char *filename = "Theme From San Andreas.mid";
-    //const char *filename = "Tetris - Tetris Main Theme.mid";
-    //const char* filename = "darude-sandstorm.mid";
-    //const char* filename = "Gigi_Dagostino__Lamour_Toujours.mid";
-    //const char *filename = "doom.mid";
-    //const char *filename = "TakeOnMe.mid";
-    //const char *filename = "Guns n Roses - November Rain.mid";
-    //const char *filename = "mozart-piano-concerto-21-2-elvira-madigan-piano-solo.mid";
-    //const char *filename = "John Lennon - Imagine.mid";
-    //const char *filename = "BadRomance.mid";
-    //const char* filename = "The Legend of Zelda Ocarina of Time - Song of Storms.mid";
-    //const char* filename = "The Legend of Zelda Ocarina of Time - New Ocarina Melody.mid";
-    //const char *filename = "Guns n Roses - Sweet Child O Mine.mid";
-    //const char *filename = "goonies.mid";
-    //const char *filename = "kungfu.mid";
-    //const char *filename = "metalgr1.mid";
-    //const char *filename = "MetalGearMSX_OperationIntrudeN313.mid";
-    //const char *filename = "Theme_of_tara_jannee2.mid";
-    //const char *filename = "Dr_Dre_Still_Dre_Ft_Snoop_Dog.mid";
-    //const char *filename = "Star_Wars__Imperial_March.mid";
-    //const char *filename = "Indiana_Jones__Theme_Music.mid";
-    //const char *filename = "Ennio_Morricone_OnceuponatimeinAmerica.mid";
-    const char *filename = "piano_sonata_545_1_(c)oguri.mid";
-    //const char *filename = "Simpsonstheme.mid";
-    //const char *filename = "romanceforclassicalguitar.mid";
-    //const char *filename = "Greek_Zorba.mid";
-    //const char *filename = "Soundtrack_Ghostbusters.mid";
-    //const char *filename = "MADONNA.Holiday K.mid";
-    //const char *filename = "Ennio_Morricone__Thegoodthebadandtheugly.mid";
+    if (argc==2)
+    {
+	current_midi = argv[1];
+    }
+    else if (argc==3 && strcmp(argv[1],"-f")==0)
+    {
+	current_midi=NULL;
+	midi_folder = argv[2];
+	printf("Loading from folder: %s\n", midi_folder);
 
-    current_midi = (argc > 1)?argv[1]:filename;
+        get_midi_list(midi_folder, &midi_files);
+    }
+    else
+    {
+	printf("usage:\n\n");
+	printf("usage:\n\n");
+	printf("- SimpleMidi song.mid\n");
+	printf("- SimpleMidi -f folder_with_midis\n");
+        exit(0);
+    }
 
     // Generate a default palette. The palette will persist and can be edited.
     for (int n = 0; n < IM_ARRAYSIZE(saved_palette); n++)

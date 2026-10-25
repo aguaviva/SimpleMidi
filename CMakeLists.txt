@@ -1,29 +1,43 @@
-cmake_minimum_required(VERSION 3.0.0)
+cmake_minimum_required(VERSION 3.20)
+project(todo-app CXX)
+set(CMAKE_CXX_STANDARD 20)
+set(CMAKE_CXX_STANDARD_REQUIRED ON)
 
-set(CMAKE_TOOLCHAIN_FILE "/home/raul/repos/vcpkg/scripts/buildsystems/vcpkg.cmake")
-message(STATUS "vcpkg: ${CMAKE_TOOLCHAIN_FILE}")
+# GLFW — disable docs/tests/examples, we only want the library
+set(GLFW_BUILD_DOCS     OFF CACHE BOOL "" FORCE)
+set(GLFW_BUILD_TESTS    OFF CACHE BOOL "" FORCE)
+set(GLFW_BUILD_EXAMPLES OFF CACHE BOOL "" FORCE)
+add_subdirectory(external/glfw)
 
-project(SimpleMidi VERSION 0.1.0)
+# ImGui — compiled as a static library
+set(IMGUI_DIR ${CMAKE_SOURCE_DIR}/external/imgui)
+add_library(imgui STATIC
+    ${IMGUI_DIR}/imgui.cpp
+    ${IMGUI_DIR}/imgui_draw.cpp
+    ${IMGUI_DIR}/imgui_tables.cpp
+    ${IMGUI_DIR}/imgui_widgets.cpp
+    ${IMGUI_DIR}/backends/imgui_impl_glfw.cpp
+    ${IMGUI_DIR}/backends/imgui_impl_opengl3.cpp
+)
+target_include_directories(imgui PUBLIC
+    ${IMGUI_DIR}
+    ${IMGUI_DIR}/backends
+)
+target_link_libraries(imgui PUBLIC glfw)
 
-find_package(imgui CONFIG REQUIRED)
 
-find_package(glfw3 CONFIG REQUIRED)
+# the app
+add_executable(SimpleMidi SimpleMidi.cpp inst-piano.cpp audio.cpp misc.cpp midi.cpp)
+target_link_libraries(SimpleMidi PRIVATE imgui)
 
-set(msfa_found OFF)
-
-set(source_files SimpleMidi.cpp inst-piano.cpp audio.cpp misc.cpp midi.cpp)
-set(libraries OpenGL glfw imgui::imgui)
-
-if (${msfa_found})
-  message(STATUS "MSFA found!")
-  add_subdirectory(msfa)
-  list(APPEND source_files inst-dx7.cpp)
-  list(APPEND libraries DX7)
-  add_compile_definitions(MSFA_FOUND)
+if(APPLE)
+    target_link_libraries(SimpleMidi PRIVATE "-framework OpenGL")
+elseif(WIN32)
+    target_link_libraries(SimpleMidi PRIVATE opengl32)
+else()
+    find_package(OpenGL REQUIRED)
+    target_link_libraries(SimpleMidi PRIVATE OpenGL::GL)
 endif()
-
-add_executable(SimpleMidi ${source_files})
-target_link_libraries(SimpleMidi PRIVATE  ${libraries})
 
 
 if (${UNIX})
@@ -42,6 +56,3 @@ elseif (${APPLE})
   # ...
 endif (${UNIX})
 
-set(CPACK_PROJECT_NAME ${PROJECT_NAME})
-set(CPACK_PROJECT_VERSION ${PROJECT_VERSION})
-include(CPack) 
