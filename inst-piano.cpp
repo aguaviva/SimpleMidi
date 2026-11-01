@@ -173,6 +173,8 @@ public:
         m_adsr.set_sample_rate(sample_rate);
     }
 
+    void reset() { m_note=0; }
+
     void press(uint32_t time, unsigned char note, unsigned char velocity)
     {
         if(velocity>0)
@@ -232,9 +234,15 @@ public:
         m_time = 0;
     }
 
+    void reset()
+    {
+        for (uint32_t i = 0; i < _countof(m_channel); i++)
+            m_channel[i].reset();
+    }
+
     void set_adsr(float attack, float duration, float release)
     {
-        for (int i = 0; i < _countof(m_channel); i++)
+        for (uint32_t i = 0; i < _countof(m_channel); i++)
         {
             m_channel[i].m_adsr.set_adr(0.01f, 0.1f, 0.2f);
         }

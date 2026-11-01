@@ -7,20 +7,83 @@
 #include <stdint.h>
 #include <stdlib.h>
 #include <string.h>
+#include "audio.h"
+#include "midi.h"
+#include "inst-piano.h"
+#include "misc.h"
+
+size_t total_rendered_samples = 0;
+bool bExit = true;
+
+int32_t play_callback(int32_t frames_to_deliver, const void* object, float* buffer) {
+    if (bExit) {
+        return 0;
+    }
+    memset(buffer, 0, static_cast<size_t>(frames_to_deliver) * 2 * sizeof(float));
+
+    auto* song = static_cast<MidiSong*>(const_cast<void*>(object));
+    size_t remaining = static_cast<size_t>(frames_to_deliver);
+    size_t offset = 0;
+    while (remaining > 0) {
+        const size_t rendered = song->RenderMidi(48000, remaining);
+        if (rendered == NO_EVENTS) {
+            break;
+        }
+        for (uint32_t track = 0; track < song->GetTrackCount(); ++track) {
+            Instrument* instrument = song->GetTrack(track)->pPiano;
+            if (instrument) {
+                instrument->render_samples(static_cast<uint32_t>(rendered), buffer + 2 * offset);
+            }
+        }
+        remaining -= rendered;
+        offset += rendered;
+    }
+    total_rendered_samples += offset;
+    return static_cast<int32_t>(offset);
+}
+
+#ifdef SIMPLEMIDI_CLI_ONLY
+
+int main(int argc, char** argv) {
+    if (argc != 2) {
+        fprintf(stderr, "Usage: SimpleMidi <song.mid>\n");
+        return 2;
+    }
+
+    uint8_t* midi_buffer = nullptr;
+    size_t midi_size = 0;
+    if (!load_file(argv[1], &midi_buffer, &midi_size)) {
+        return 1;
+    }
+
+    MidiSong song;
+    if (!song.LoadMidi(midi_buffer, midi_size)) {
+        free(midi_buffer);
+        fprintf(stderr, "Could not load MIDI file: %s\n", argv[1]);
+        return 1;
+    }
+    for (uint32_t track = 0; track < song.GetTrackCount(); ++track) {
+        song.GetTrack(track)->pPiano = GetNewPiano();
+    }
+
+    bExit = false;
+    playLoop(0.1f, 48000, &song, play_callback);
+    free(midi_buffer);
+    return 0;
+}
+
+#else
+
 #include <thread>
 #include <map>
 #include <vector>
 #include <string>
-#include "audio.h"
-#include "midi.h"
-
-#include "inst-piano.h"
-Instrument *GetDX7(char *pFilename_bank);
-
 #include "imgui.h"
 #include "imgui_impl_glfw.h"
 #include "imgui_impl_opengl3.h"
 #include <GLFW/glfw3.h> // Will drag system OpenGL headers
+
+Instrument *GetDX7(char *pFilename_bank);
 
 
 class drawInst : public Instrument
@@ -117,24 +180,6 @@ void create_piano_roll(MidiSong *pMidi)
 }
 
 std::vector<std::string> midi_files;
-
-size_t total_rendered_samples = 0;
-
-bool bExit = true;
-int32_t play_callback(int32_t frames_to_deliver, const void *object, float *buf)
-{
-    if (bExit)
-        return 0;
-
-    for (uint32_t i=0;i<frames_to_deliver*2;i++)
-        buf[i]=0;
-
-    size_t rendered_samples =  ((MidiSong*)object)->RenderMidi(48000, frames_to_deliver, buf);
-
-    total_rendered_samples += rendered_samples;
-
-    return rendered_samples;    
-}
 
 int inst[20];
 class MidiPlayer
@@ -481,3 +526,5 @@ int main(int argc, char **argv)
 
     return 0;
 }
+
+#endif

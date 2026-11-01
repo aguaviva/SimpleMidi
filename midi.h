@@ -149,6 +149,7 @@ public:
     uint32_t sequencer_step(uint32_t time);
     void render_tracks(uint32_t size, float *pOut);
     size_t step();
+    size_t RenderMidi(const uint32_t sampleRate, size_t size);
     size_t RenderMidi(const uint32_t sampleRate, size_t size, float *pOut);
     bool LoadMidi(uint8_t *midi_buffer, size_t midi_buffer_size);
     void Reset();

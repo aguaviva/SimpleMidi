@@ -282,7 +282,8 @@ void MidiSong::render_tracks(uint32_t n_samples, float *pOut)
 {
     for (uint32_t t = 0; t < m_tracks; t++)
     {
-        m_pTrack[t]->pPiano->render_samples(n_samples, pOut);
+        if (m_pTrack[t]->pPiano!=NULL)
+            m_pTrack[t]->pPiano->render_samples(n_samples, pOut);
     }
 }
 
@@ -334,6 +335,23 @@ size_t MidiSong::RenderMidi(const uint32_t sampleRate, size_t size, float *pOut)
     }
 
     return size_org - size;
+}
+
+size_t MidiSong::RenderMidi(const uint32_t sampleRate, size_t size)
+{
+    if (m_event_samples_to_render == 0)
+    {
+        uint64_t microseconds_to_render = step();
+        if (microseconds_to_render == NO_EVENTS)
+            return NO_EVENTS;
+        
+        m_event_samples_to_render = ( (uint64_t)(sampleRate/1000) * microseconds_to_render)/ 1000;
+    }
+
+    uint32_t n_samples = MIN(size, m_event_samples_to_render);
+    m_event_samples_to_render -= n_samples;
+    
+    return (size_t)n_samples;
 }
 
 uint32_t MidiSong::get_elapsed_milliseconds()
@@ -390,6 +408,12 @@ void MidiSong::Reset()
     m_elapsed_microseconds = 0;
     m_midi_state.m_time = 0;
 
-    for (int i=0;i<m_tracks;i++)
+    for (uint32_t i=0;i<m_tracks;i++)
         m_pTrack[i]->Reset();
+
+    for (uint32_t t = 0; t < m_tracks; t++)
+    {
+        if (m_pTrack[t]->pPiano)
+            m_pTrack[t]->pPiano->reset();
+    }        
 }
