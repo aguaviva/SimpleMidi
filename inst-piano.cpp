@@ -159,7 +159,7 @@ public:
 
 struct Channel
 {
-    SquareWaveOscillator osc;
+    SquareWaveOscillator osc,osc2;
     uint32_t m_velocity = 0;
     uint8_t m_note = 0;
     uint32_t m_sample_rate = 0;
@@ -183,6 +183,7 @@ public:
             m_note = note;
             m_velocity = velocity;
             osc.press(time, (uint32_t)(m_sample_rate / NoteToFreq(note))/2);
+            osc2.press(time, (uint32_t)(m_sample_rate / NoteToFreq(note+12))/2);
         }
         else
         {
@@ -207,7 +208,7 @@ public:
             return 0;
         }
 
-        return osc.render(time) * vol * (m_velocity/127.0f);
+        return (osc.render(time) + osc2.render(time)) * vol * (m_velocity/127.0f);
     }
 };
 

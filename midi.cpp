@@ -35,7 +35,7 @@ void MidiTrack::Reset()
     m_elapsed_microseconds = 0;
 }
 
-uint32_t MidiTrack::play(uint32_t midi_ticks)
+uint32_t MidiTrack::play(uint32_t midi_ticks, MidiSendFunc pFunc)
 {
     // too early for the next event, bail out
     if (midi_ticks < m_nextTime)
@@ -203,8 +203,8 @@ uint32_t MidiTrack::play(uint32_t midi_ticks)
                 unsigned char speed = GetByte();
 
                 uint8_t data[3] = { m_status , key, speed };
-                if (pPiano!=NULL) 
-                    pPiano->send_midi(data, 3);
+                if (pFunc!=NULL) 
+                    pFunc(data, 3);
             }
             else if (subType == 0xC) // set program
             {
@@ -213,16 +213,16 @@ uint32_t MidiTrack::play(uint32_t midi_ticks)
                 uint8_t data[2] = { m_status , program };
                 //LOG(" %s: program %i: %i\n", m_TrackName, channel, program);
 
-                if (pPiano!=NULL) 
-                    pPiano->send_midi(data, 2);
+                if (pFunc!=NULL) 
+                    pFunc(data, 2);
             }
             else if (subType == 0xD) // channel pressure
             {
                 unsigned char cc = GetByte();
 
                 uint8_t data[2] = { m_status , cc };
-                if (pPiano!=NULL) 
-                    pPiano->send_midi(data, 2);
+                if (pFunc!=NULL) 
+                    pFunc(data, 2);
             }
             else if (subType == 0xE)
             {
@@ -230,8 +230,8 @@ uint32_t MidiTrack::play(uint32_t midi_ticks)
                 unsigned char dd = GetByte();
 
                 uint8_t data[3] = { m_status , cc, dd };
-                if (pPiano!=NULL) 
-                    pPiano->send_midi(data, 3);
+                if (pFunc!=NULL) 
+                    pFunc(data, 3);
             }
             else
             {
@@ -272,7 +272,7 @@ uint32_t MidiSong::sequencer_step(uint32_t time)
     uint32_t nextEventTime = NO_EVENTS;
     for (uint32_t t = 0; t < m_tracks; t++)
     {
-        uint32_t next = m_pTrack[t]->play(time);
+        uint32_t next = m_pTrack[t]->play(time, pFunc[t]);
         nextEventTime = MIN(next, nextEventTime);
     }
     return nextEventTime;
@@ -280,11 +280,13 @@ uint32_t MidiSong::sequencer_step(uint32_t time)
 
 void MidiSong::render_tracks(uint32_t n_samples, float *pOut)
 {
+    /*
     for (uint32_t t = 0; t < m_tracks; t++)
     {
         if (m_pTrack[t]->pPiano!=NULL)
             m_pTrack[t]->pPiano->render_samples(n_samples, pOut);
     }
+    */
 }
 
 size_t MidiSong::step()
@@ -387,7 +389,7 @@ bool MidiSong::LoadMidi(uint8_t *midi_buffer, size_t midi_buffer_size)
         {
             int length = ch.GetLength(4);
             m_pTrack[m_tracks] = new MidiTrack(ch.m_pTrack, ch.m_pTrack + length, &m_midi_state);
-            m_pTrack[m_tracks]->play(0);
+            m_pTrack[m_tracks]->play(0, NULL);
             ch.Skip(length);
             m_tracks++;
         }
@@ -413,7 +415,7 @@ void MidiSong::Reset()
 
     for (uint32_t t = 0; t < m_tracks; t++)
     {
-        if (m_pTrack[t]->pPiano)
-            m_pTrack[t]->pPiano->reset();
+        //if (m_pTrack[t]->pPiano)
+        //    m_pTrack[t]->pPiano->reset();
     }        
 }

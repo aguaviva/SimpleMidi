@@ -6,7 +6,6 @@
 #include <stdlib.h>
 #include <string.h>
 
-#include "instrument.h"
 #include "misc.h"
 
 #define MIN(a,b) ((a<b)?a:b)
@@ -102,6 +101,11 @@ struct MidiState
 // MidiTrack
 ///////////////////////////////////////////////////////////////
 
+#include <functional>
+
+// Change from raw function pointer to std::function
+using MidiSendFunc = std::function<void(uint8_t*, size_t)>;
+
 class MidiTrack : public MidiStream
 {
     uint64_t m_nextTime = 0;
@@ -116,11 +120,11 @@ public:
     uint8_t m_status;
     uint32_t m_timesignatureNum = 4;
     uint32_t m_timesignatureDen = 4;
-    Instrument *pPiano = NULL;
+    //Instrument *pPiano = NULL;
 
     MidiTrack(uint8_t *ini, uint8_t*fin, MidiState *pMidiState = NULL);
     void Reset();
-    uint32_t play(uint32_t midi_ticks);
+    uint32_t play(uint32_t midi_ticks, MidiSendFunc pFunc);
     uint32_t get_elapsed_milliseconds() { return m_elapsed_microseconds/1000; };
     void set_private_data(void *pData) { m_pPrivateData = pData; }
     void *get_private_data() { return m_pPrivateData; }
@@ -140,6 +144,7 @@ class MidiSong
     uint32_t m_elapsed_microseconds;
     uint32_t m_event_samples_to_render;
 public:
+    MidiSendFunc pFunc[50];
     MidiState m_midi_state;
 
     MidiSong();

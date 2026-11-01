@@ -62,9 +62,15 @@ int main(int argc, char** argv) {
         fprintf(stderr, "Could not load MIDI file: %s\n", argv[1]);
         return 1;
     }
-    for (uint32_t track = 0; track < song.GetTrackCount(); ++track) {
-        song.GetTrack(track)->pPiano = GetNewPiano();
-    }
+
+    for (uint32_t t = 0; t < song.GetTrackCount(); t++)
+    {
+        Instrument *inst  = GetNewPiano(); 
+        instruments_[t] = inst;
+        song.pFunc[t] = [inst](uint8_t* pdata, size_t size) {
+                inst->send_midi(pdata, size);
+        };
+    }         
 
     bExit = false;
     playLoop(0.1f, 48000, &song, play_callback);
@@ -213,13 +219,15 @@ class MidiPlayer
     {
         for (uint32_t t = 0; t < midi.GetTrackCount(); t++)
         {
-#ifdef MSFA_FOUND            
-            midi.GetTrack(t)->pPiano = GetDX7("./rom1a.syx");
-#else    
-            midi.GetTrack(t)->pPiano = GetNewPiano();
-#endif            
-            //
-        }
+#ifdef MSFA_FOUND  
+            Instrument *inst  = GetDX7("./rom1a.syx");
+#else            
+            Instrument *inst  = GetNewPiano();
+#endif
+            midi.pFunc[t] = [inst](uint8_t* pdata, size_t size) {
+                    inst->send_midi(pdata, size);
+            };
+        } 
     }
 
     void play()
