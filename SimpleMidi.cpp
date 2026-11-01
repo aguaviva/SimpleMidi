@@ -15,6 +15,9 @@
 size_t total_rendered_samples = 0;
 bool bExit = true;
 
+
+Instrument *inst[50];
+
 int32_t play_callback(int32_t frames_to_deliver, const void* object, float* buffer) {
     if (bExit) {
         return 0;
@@ -30,10 +33,7 @@ int32_t play_callback(int32_t frames_to_deliver, const void* object, float* buff
             break;
         }
         for (uint32_t track = 0; track < song->GetTrackCount(); ++track) {
-            Instrument* instrument = song->GetTrack(track)->pPiano;
-            if (instrument) {
-                instrument->render_samples(static_cast<uint32_t>(rendered), buffer + 2 * offset);
-            }
+                inst[track]->render_samples(static_cast<uint32_t>(rendered), buffer + 2 * offset);
         }
         remaining -= rendered;
         offset += rendered;
@@ -65,10 +65,10 @@ int main(int argc, char** argv) {
 
     for (uint32_t t = 0; t < song.GetTrackCount(); t++)
     {
-        Instrument *inst  = GetNewPiano(); 
-        instruments_[t] = inst;
-        song.pFunc[t] = [inst](uint8_t* pdata, size_t size) {
-                inst->send_midi(pdata, size);
+        Instrument *instrument  = GetNewPiano(); 
+	inst[t]=instrument;
+        song.pFunc[t] = [instrument](uint8_t* pdata, size_t size) {
+                instrument->send_midi(pdata, size);
         };
     }         
 
