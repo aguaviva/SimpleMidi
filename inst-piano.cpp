@@ -47,7 +47,11 @@ class ADSR
     uint32_t releaseDuration;
 
 public:
-
+    void reset()
+    {
+       m_envelope = OFF;
+       m_time = 0;
+    }
     void set_adr(float attack, float duration, float release)
     {
         attackDuration  = m_sample_rate * attack;
@@ -130,6 +134,14 @@ class SquareWaveOscillator
     bool m_square = false;
 
 public:
+    void reset()
+    {
+        m_time=0;
+        m_period = 0;
+        m_phase = 0;
+        m_square = false;
+    }
+
     float render(uint32_t time)
     {
         m_time++;
@@ -173,7 +185,13 @@ public:
         m_adsr.set_sample_rate(sample_rate);
     }
 
-    void reset() { m_note=0; }
+    void reset() 
+    { 
+        m_note=0; 
+        osc.reset();
+        osc2.reset();
+        m_adsr.reset();
+    }
 
     void press(uint32_t time, unsigned char note, unsigned char velocity)
     {
@@ -366,7 +384,7 @@ public:
             int32_t pitch_wheel = ((pdata[1] & 0x7f) | ((pdata[2] & 0x7f) << 7)) - 8192;
             float t = (float)(pitch_wheel) / (8192.0);
             int32_t note = m_channel[channel].m_note;
-            float freq = NoteToFreqFrac((float)note + 10.0 * t);
+            float freq = NoteToFreqFrac((float)note + 2.0 * t);
 
             m_channel[channel].osc.set_period( (uint32_t)(m_sample_rate/ freq) / 2);
 

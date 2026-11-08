@@ -11,12 +11,151 @@
 #include "midi.h"
 #include "inst-piano.h"
 #include "misc.h"
+#include <thread>
+#include <unit_tests.h>
+
+const uint32_t sample_rate = 48000;
 
 size_t total_rendered_samples = 0;
 bool bExit = true;
 
+int32_t play_callback(int32_t frames_to_deliver, const void* object, float* buffer);
 
-Instrument *inst[50];
+class MidiPlayer
+{
+    size_t midi_size;
+    uint8_t* pMidi_buffer;
+
+    std::thread m_thread;
+
+    public:
+    MidiSong midi;
+    MidiSendFunc pFunc[50];
+    Instrument *instruments[50];
+    uint32_t m_event_samples_to_render;
+
+    bool load(char *pFilename)
+    {
+        stop();            
+        m_event_samples_to_render = 0;
+
+        load_file(pFilename, &pMidi_buffer, &midi_size);
+
+        midi.Reset();
+        
+        return midi.LoadMidi(pMidi_buffer, midi_size);
+    }
+
+    void unload()
+    {
+        stop();
+        
+        for (uint32_t t = 0; t < midi.GetTrackCount(); t++)
+        {
+            pFunc[t]=NULL;
+
+            delete instruments[t];
+            instruments[t] = NULL;
+        }
+        free(pMidi_buffer);
+    }
+
+    void set_instruments()
+    {
+        for (uint32_t t = 0; t < midi.GetTrackCount(); t++)
+        {
+#ifdef MSFA_FOUND  
+            Instrument *instrument = GetDX7("./rom1a.syx");
+#else            
+            Instrument *instrument = GetNewPiano();
+#endif
+            instruments[t] = instrument;
+            pFunc[t] = [instrument](uint8_t* pdata, size_t size) {
+                    instrument->send_midi(pdata, size);
+            };
+        } 
+    }
+
+    void play()
+    {
+        if (bExit==true)
+        {
+            bExit = false;
+            const void *pData = (void *)&midi;
+            std::thread t1(playLoop, .1f, sample_rate, pData, play_callback);
+            m_thread.swap(t1);
+        }
+        else
+        {
+            bExit = true;
+            m_thread.join();
+        }
+    }
+
+    void stop()
+    {
+        if (bExit==false)
+        {
+            bExit = true;
+            m_thread.join();
+            midi.Reset();
+            total_rendered_samples = 0;
+            m_event_samples_to_render = 0;
+            for (uint32_t t = 0; t < midi.GetTrackCount(); t++)
+            {
+                instruments[t]->reset();
+            }
+        }
+    }
+
+    void join()
+    {
+        m_thread.join();
+    }
+
+    uint32_t seek(float t)
+    {
+        stop();
+        uint32_t micros = midi.seek(t*1e6, pFunc);
+        total_rendered_samples = ((uint64_t)micros * sample_rate) / 1000000;
+        play();
+        return micros;
+    }
+
+    uint32_t render(int32_t frames_to_deliver, float* buffer)
+    {
+        if (bExit==true)
+            return 0;
+
+        uint32_t offset = 0;
+        uint32_t remaining = frames_to_deliver;
+        while (remaining > 0) 
+        {
+            if (m_event_samples_to_render == 0)
+            {
+                uint64_t microseconds_to_render = midi.step(pFunc);
+                if (microseconds_to_render == NO_EVENTS)
+                    return 0;
+
+                m_event_samples_to_render = (uint64_t)(sample_rate * microseconds_to_render)/ 1000000;
+            }
+
+            uint32_t rendered = MIN(remaining, m_event_samples_to_render);
+            m_event_samples_to_render -= rendered;
+
+            for (uint32_t track = 0; track < midi.GetTrackCount(); ++track) 
+            {
+                instruments[track]->render_samples(rendered, buffer + 2 * offset);
+            }
+
+            remaining -= rendered;
+            offset += rendered;
+        }
+        return offset;
+    }
+};
+
+MidiPlayer midi_player;
 
 int32_t play_callback(int32_t frames_to_deliver, const void* object, float* buffer) {
     if (bExit) {
@@ -24,21 +163,8 @@ int32_t play_callback(int32_t frames_to_deliver, const void* object, float* buff
     }
     memset(buffer, 0, static_cast<size_t>(frames_to_deliver) * 2 * sizeof(float));
 
-    auto* song = static_cast<MidiSong*>(const_cast<void*>(object));
-    size_t remaining = static_cast<size_t>(frames_to_deliver);
-    size_t offset = 0;
-    while (remaining > 0) {
-        const size_t rendered = song->RenderMidi(48000, remaining);
-        if (rendered == NO_EVENTS) {
-            break;
-        }
-        for (uint32_t track = 0; track < song->GetTrackCount(); ++track) {
-                inst[track]->render_samples(static_cast<uint32_t>(rendered), buffer + 2 * offset);
-        }
-        remaining -= rendered;
-        offset += rendered;
-    }
-    total_rendered_samples += offset;
+    uint32_t offset = midi_player.render(frames_to_deliver, buffer);
+    total_rendered_samples+=offset;
     return static_cast<int32_t>(offset);
 }
 
@@ -50,31 +176,14 @@ int main(int argc, char** argv) {
         return 2;
     }
 
-    uint8_t* midi_buffer = nullptr;
-    size_t midi_size = 0;
-    if (!load_file(argv[1], &midi_buffer, &midi_size)) {
+    if (!midi_player.load(argv[1])) {
         return 1;
     }
 
-    MidiSong song;
-    if (!song.LoadMidi(midi_buffer, midi_size)) {
-        free(midi_buffer);
-        fprintf(stderr, "Could not load MIDI file: %s\n", argv[1]);
-        return 1;
-    }
+    midi_player.set_instruments();
+    midi_player.play();
+    midi_player.join();
 
-    for (uint32_t t = 0; t < song.GetTrackCount(); t++)
-    {
-        Instrument *instrument  = GetNewPiano(); 
-	inst[t]=instrument;
-        song.pFunc[t] = [instrument](uint8_t* pdata, size_t size) {
-                instrument->send_midi(pdata, size);
-        };
-    }         
-
-    bExit = false;
-    playLoop(0.1f, 48000, &song, play_callback);
-    free(midi_buffer);
     return 0;
 }
 
@@ -97,7 +206,7 @@ class drawInst : public Instrument
 public:
     std::vector<ImVec2> pos;
 
-    float m_time;
+    float m_time = 0;
 
     std::map<int32_t,float> m_key; 
     
@@ -120,8 +229,8 @@ public:
             if (subType == 8 || speed==0)
             {
                 float time = m_key[key];
+                pos.push_back(ImVec2(  time, (key+0)));                
                 pos.push_back(ImVec2(m_time, (key+0)));
-                pos.push_back(ImVec2(  time, (key+1)));                
             }
             else if (subType == 9)
             {
@@ -130,56 +239,61 @@ public:
         }        
     }
 
-    void draw(ImDrawList* draw_list, ImVec2 canvas_p0, ImVec2 canvas_p1, float time_ini, float time_fin, ImU32 color)
+    void draw(ImDrawList* draw_list, ImVec2 canvas_p0, ImVec2 canvas_p1, float time_ini, float time_fin, float time_current, ImU32 color)
     {
         for(int i=0;i<pos.size();i+=2)
         {
             float t;
 
-            t = unlerp(pos[i+0].y, (float)m_min_key, (float)m_max_key);
-            float y0 = lerp(canvas_p1.y, canvas_p0.y, t);
-            t = unlerp(pos[i+1].y, (float)m_min_key, (float)m_max_key);
-            float y1 = lerp(canvas_p1.y, canvas_p0.y, t);
+            t = unlerp(pos[i+0].y+0, (float)m_min_key, (float)m_max_key+1);
+            float y0 = lerp(canvas_p1.y-1, canvas_p0.y+1, t);
+            t = unlerp(pos[i+1].y+1, (float)m_min_key, (float)m_max_key+1);
+            float y1 = lerp(canvas_p1.y-1, canvas_p0.y+1, t);
 
-            t = unlerp(pos[i+0].x, time_ini, time_fin);
-            float x0 = lerp(canvas_p0.x, canvas_p1.x, t);
-            t = unlerp(pos[i+1].x, time_ini, time_fin);
-            float x1 = lerp(canvas_p0.x, canvas_p1.x, t);
+            float t1 = unlerp(pos[i+0].x, time_ini, time_fin);
+            float t2 = unlerp(pos[i+1].x, time_ini, time_fin);
+            float x0 = lerp(canvas_p0.x+1, canvas_p1.x-1, t1);
+            float x1 = lerp(canvas_p0.x+1, canvas_p1.x-1, t2);
 
-            draw_list->AddRectFilled(ImVec2(x0, y0), ImVec2(x1, y1), color);
+            if (time_current>pos[i+0].x && (time_current<pos[i+1].x))
+                draw_list->AddRectFilled(ImVec2(x0, y0), ImVec2(x1, y1), IM_COL32_WHITE);
+            else
+                draw_list->AddRectFilled(ImVec2(x0, y0), ImVec2(x1, y1), color);
+            
         }
     }    
 
     virtual void render_samples(uint32_t n_samples, float* pOut) {}
 };
 
+drawInst *pI;
 std::vector<float> ticks;
-
 void create_piano_roll(MidiSong *pMidi)
 {
-    drawInst *pI = new drawInst[pMidi->GetTrackCount()];
-
+    pI = new drawInst[pMidi->GetTrackCount()];
     for (uint32_t t = 0; t < pMidi->GetTrackCount(); t++)
     {
-        pMidi->GetTrack(t)->pPiano = &pI[t];
-        pMidi->GetTrack(t)->set_private_data(&pI[t]);
+        Instrument *inst = &pI[t];
+        midi_player.pFunc[t] = [inst](uint8_t* pdata, size_t size) {
+            inst->send_midi(pdata, size);
+        };
     }
 
     pMidi->Reset();
 
-    while(pMidi->step()!=NO_EVENTS) 
+    while(pMidi->step(midi_player.pFunc)!=NO_EVENTS) 
     {
         for(int i=0;i<pMidi->GetTrackCount();i++)
         {
-            pI[i].m_time = pMidi->get_elapsed_milliseconds()/1000.0f;
+            pI[i].m_time = pMidi->get_elapsed_microseconds()/1000000.0f;
         }
     }
 
     ticks.clear();
     for (int i=0;i<200;i++)
     {
-        float milliseconds_per_midi_tick = (pMidi->m_midi_state.m_microSecondsPerMidiTick/ 1000.0f);
-        ticks.push_back(i*(pMidi->m_midi_state.m_ticksPerQuarterNote * milliseconds_per_midi_tick)/1000.0f);
+        //float milliseconds_per_midi_tick = (pMidi->m_midi_state.m_microSecondsPerMidiTick/ 1000.0f);
+        ticks.push_back((i*pMidi->get_microseconds_per_quarter_note())/1000000.0f);
     }
 
     pMidi->Reset();
@@ -188,81 +302,45 @@ void create_piano_roll(MidiSong *pMidi)
 std::vector<std::string> midi_files;
 
 int inst[20];
-class MidiPlayer
-{
-    size_t midi_size;
-    uint8_t* pMidi_buffer;
-
-    std::thread m_thread;
-
-    public:
-    MidiSong midi;
-
-    bool load(char *pFilename)
-    {
-        stop();            
-
-        load_file(pFilename, &pMidi_buffer, &midi_size);
-
-        midi.Reset();
-
-        return midi.LoadMidi(pMidi_buffer, midi_size);
-    }
-
-    void unload()
-    {
-        stop();
-        free(pMidi_buffer);
-    }
-
-    void set_instruments()
-    {
-        for (uint32_t t = 0; t < midi.GetTrackCount(); t++)
-        {
-#ifdef MSFA_FOUND  
-            Instrument *inst  = GetDX7("./rom1a.syx");
-#else            
-            Instrument *inst  = GetNewPiano();
-#endif
-            midi.pFunc[t] = [inst](uint8_t* pdata, size_t size) {
-                    inst->send_midi(pdata, size);
-            };
-        } 
-    }
-
-    void play()
-    {
-        if (bExit==true)
-        {
-            bExit = false;
-            const void *pData = (void *)&midi;
-            std::thread t1(playLoop, .1f, 48000, pData, play_callback);
-            m_thread.swap(t1);
-        }
-    }
-
-    void stop()
-    {
-        if (bExit==false)
-        {
-            bExit = true;
-            m_thread.join();
-        }
-    }
-};
-
-MidiPlayer midi_player;
 bool midi_reload = false;
+const char *midi_folder = ".";
 static const char* current_midi = NULL;
 
-void draw_track(int t, MidiSong *pMidi, float time_ini, float time_fin, float global_time, ImVec4 color)
+void GenerateTrack(ImVec2 *pP0, ImVec2 *pP1)
 {
-    MidiTrack *pTrack = pMidi->GetTrack(t);
-    drawInst *pInstDraw = (drawInst *)(pTrack->get_private_data());
+    *pP0 = ImGui::GetCursorScreenPos();      // ImDrawList API uses screen coordinates!
+    ImVec2 canvas_sz = ImGui::GetContentRegionAvail();   // Resize canvas to what's available
+    canvas_sz.y = 75;
+    //if (canvas_sz.x < 50.0f) canvas_sz.x = 50.0f;
+    //if (canvas_sz.y < 50.0f) canvas_sz.y = 50.0f;
+    *pP1 = ImVec2(pP0->x + canvas_sz.x, pP0->y + canvas_sz.y);
 
-    if (pInstDraw->pos.size()==0)
-        return;
+    ImGui::InvisibleButton("my_button_id", canvas_sz);
+}
 
+bool MouseInRectangle(ImVec2 p0, ImVec2 p1, float *pX)
+{
+    ImGuiIO& io = ImGui::GetIO();
+    const ImVec2 canvas_sz = ImVec2(p1.x - p0.x, p1.y - p0.y);
+    const ImVec2 mouse_pos_in_canvas((io.MousePos.x - p0.x) / canvas_sz.x, -(io.MousePos.y - p1.y) / canvas_sz.y);
+
+    if (ImGui::IsMouseClicked(ImGuiMouseButton_Left))
+    {
+        if (
+            mouse_pos_in_canvas.x>=0.0f && 
+            mouse_pos_in_canvas.x<=1.0f &&
+            mouse_pos_in_canvas.y>=0.0f && 
+            mouse_pos_in_canvas.y<=1.0f)
+        {
+            *pX = mouse_pos_in_canvas.x;
+            return true;
+        }
+    }
+    return false;
+}
+
+void draw_track(drawInst *pInstDraw, const ImVec2 &canvas_p0, const ImVec2 &canvas_p1, float time_ini, float time_fin, float global_time, ImVec4 color)
+{
 #ifdef MSFA_FOUND            
     //allows changing instrument
     ImGui::PushID(t);
@@ -275,46 +353,14 @@ void draw_track(int t, MidiSong *pMidi, float time_ini, float time_fin, float gl
     ImGui::SameLine();
 #endif
 
-    ImGui::Text("%i %s %s", t, pTrack->m_InstrumentName, pTrack->m_TrackName);
-    ImVec2 canvas_p0 = ImGui::GetCursorScreenPos();      // ImDrawList API uses screen coordinates!
-    ImVec2 canvas_sz = ImGui::GetContentRegionAvail();   // Resize canvas to what's available
-    canvas_sz.y = 200;
-    if (canvas_sz.x < 50.0f) canvas_sz.x = 50.0f;
-    if (canvas_sz.y < 50.0f) canvas_sz.y = 50.0f;
-    ImVec2 canvas_p1 = ImVec2(canvas_p0.x + canvas_sz.x, canvas_p0.y + canvas_sz.y);
-
-    // Draw border and background color
-    ImGuiIO& io = ImGui::GetIO();
     ImDrawList* draw_list = ImGui::GetWindowDrawList();
     draw_list->AddRectFilled(canvas_p0, canvas_p1, IM_COL32(50, 50, 50, 255));
     draw_list->AddRect(canvas_p0, canvas_p1, IM_COL32(255, 255, 255, 255));
 
-    // This will catch our interactions
-    ImGui::PushID(t);
-    ImGui::InvisibleButton("##", canvas_sz, ImGuiButtonFlags_MouseButtonLeft | ImGuiButtonFlags_MouseButtonRight);
-    ImGui::PopID();
-    const bool is_hovered = ImGui::IsItemHovered(); // Hovered
-    const bool is_active = ImGui::IsItemActive();   // Held
-    const ImVec2 top_left(canvas_p0.x, canvas_p0.y); // Lock scrolled top_left
-    const ImVec2 bottom_right(canvas_p1.x, canvas_p1.y); // Lock scrolled top_left
-    const ImVec2 mouse_pos_in_canvas(io.MousePos.x - top_left.x, io.MousePos.y - top_left.y);
-
-    // Pan (we use a zero mouse threshold when there's no context menu)
-    // You may decide to make that threshold dynamic based on whether the mouse is hovering something etc.
-    static bool opt_enable_context_menu = true;
-    const float mouse_threshold_for_pan = opt_enable_context_menu ? -1.0f : 0.0f;
-    if (is_active && ImGui::IsMouseDragging(ImGuiMouseButton_Right, mouse_threshold_for_pan))
-    {
-        //scrolling.x += io.MouseDelta.x;
-        //scrolling.y += io.MouseDelta.y;
-    }
 
     // Draw grid + all lines in the canvas
     draw_list->PushClipRect(canvas_p0, canvas_p1, true);
-
-    //char str[1024];
-    //sprintf(str, "%i %s %s", pTrackOrg->m_channel, pTrackOrg->m_TrackName, pTrackOrg->m_InstrumentName);
-    //draw_list->AddText(ImVec2(canvas_p0.x+5, canvas_p0.y+5), IM_COL32(200, 200, 200, 1255), str);
+   
     static bool opt_enable_grid = true;
     if (opt_enable_grid)
     {
@@ -326,7 +372,7 @@ void draw_track(int t, MidiSong *pMidi, float time_ini, float time_fin, float gl
         }
     }
     
-    pInstDraw->draw(draw_list, canvas_p0, canvas_p1, time_ini, time_fin, IM_COL32(color.x*255, color.y*255, color.z*255, color.w*255));
+    pInstDraw->draw(draw_list, canvas_p0, canvas_p1, time_ini, time_fin, global_time, IM_COL32(color.x*255, color.y*255, color.z*255, color.w*255));
 
     {
         float t = unlerp(global_time, time_ini, time_fin);                      
@@ -341,8 +387,8 @@ void draw_track(int t, MidiSong *pMidi, float time_ini, float time_fin, float gl
 }
 
 ImVec4 saved_palette[32] = {};
-float time_width = 10.0f;
-const char *midi_folder = ".";
+float time_width = 40.0f;
+float midi_length = 0;
 
 void doui(GLFWwindow* window)
 {
@@ -352,7 +398,6 @@ void doui(GLFWwindow* window)
     static bool p_open = true;
     ImGui::Begin("Hello, world!", &p_open, ImGuiWindowFlags_NoDecoration | ImGuiWindowFlags_NoResize);                          // Create a window called "Hello, world!" and append into it.
 
-    static bool midi_reload = false;
     if (ImGui::BeginCombo("##combo", current_midi)) // The second parameter is the label previewed before opening the combo.
     {
         for (int n = 0; n < midi_files.size(); n++)
@@ -374,38 +419,33 @@ void doui(GLFWwindow* window)
         midi_reload = false;
         char path[256];
         sprintf(path, "%s/%s", midi_folder, current_midi);
-	printf("attempting to load %s\n", path);
+	    printf("attempting to load %s\n", path);
+        midi_player.unload();
         midi_player.load(path);
         total_rendered_samples = 0;
 
         //calculate piano rolls
         create_piano_roll(&midi_player.midi);
-
         midi_player.set_instruments();
+
+        midi_length = midi_player.seek(10000)/1e6;
+        midi_player.seek(0);
         midi_player.play();
     }
 
     MidiSong *pMidi = &midi_player.midi;
 
     ImGui::Text("Application average %.3f ms/frame (%.1f FPS)", 1000.0f / ImGui::GetIO().Framerate, ImGui::GetIO().Framerate);
-    //ImGui::Text("m_ticksPerQuarterNote = %d", pMidi->m_midi_state.m_ticksPerQuarterNote);
-    //ImGui::Text("m_microSecondsPerMidiTick = %d", pMidi->m_midi_state.m_microSecondsPerMidiTick);
     float ms_per_quarter_note = (pMidi->m_midi_state.m_microSecondsPerMidiTick * pMidi->m_midi_state.m_ticksPerQuarterNote)/1000.0f;
     int bpm = 60*1000/ms_per_quarter_note;
-    float time = total_rendered_samples / 48000.0f;
+    float time = total_rendered_samples / (float)sample_rate;
 
-    ImGui::Text("BPM: %d time = %f", bpm, time);
+    ImGui::Text("BPM: %d time: %f total: %f", bpm, time, midi_length);
 
     float time_ini, time_fin;
-    if (time>2.0f)
-    {
-        time_ini = time-2.0f;
-        time_fin = time+time_width-2.0f;
-    }
-    else
     {
         time_ini = 0.0f;
-        time_fin = time_width;
+        time_fin = midi_length;
     }
 
     if (ImGui::Button("Stop"))
@@ -420,11 +460,30 @@ void doui(GLFWwindow* window)
         midi_player.play();
     }
 
-    ImGui::SliderFloat("time_width", &time_width, 0.0f, 120.0f);            // Edit 1 float using a slider from 0.0f to 1.0f
+    ImGui::SliderFloat("zoom", &time_width, 0.0f, 120.0f);            // Edit 1 float using a slider from 0.0f to 1.0f
 
     for (uint32_t t = 0; t < pMidi->GetTrackCount(); t++)
     {
-        draw_track(t, pMidi, time_ini, time_fin, time, saved_palette[t]);
+        if (pI[t].pos.size()==0)
+            continue;
+
+        MidiTrack *pTrack = pMidi->GetTrack(t);
+        ImGui::PushID(t);
+        ImGui::Checkbox("##", &midi_player.instruments[t]->m_mute);
+        ImGui::SameLine();
+        ImGui::Text("%i %s %s", t, pTrack->m_InstrumentName, pTrack->m_TrackName);
+
+        ImVec2 p0, p1;
+        GenerateTrack(&p0, &p1);
+        
+        float pX;
+        if (MouseInRectangle(p0, p1, &pX))
+        {
+            midi_player.seek(pX*midi_length);
+            printf("%f, %f\n", pX, pX*midi_length);
+        }
+        draw_track(&pI[t], p0, p1, time_ini, time_fin, time, saved_palette[t]);
+        ImGui::PopID();
     }
 
     ImGui::End();
@@ -476,25 +535,33 @@ GLFWwindow* initui()
 
 int main(int argc, char **argv)
 {
-    if (argc==2)
+    //unit_tests();
+    if (argc>=3) 
     {
-	current_midi = argv[1];
-    }
-    else if (argc==3 && strcmp(argv[1],"-f")==0)
-    {
-	current_midi=NULL;
-	midi_folder = argv[2];
-	printf("Loading from folder: %s\n", midi_folder);
+        current_midi=NULL;
+        for(int i=1;i<argc;i++)
+        {
+            if (strcmp(argv[i], "-m") == 0)
+            {
+                i++;
+                current_midi = argv[i];
+                midi_reload = true;
+            }
+            else if (strcmp(argv[i], "-f") == 0)
+            {
+                i++;
+                midi_folder = argv[i];
+                printf("Loading from folder: %s\n", midi_folder);
 
-        get_midi_list(midi_folder, &midi_files);
+                get_midi_list(midi_folder, &midi_files);
+            }
+        }
     }
     else
     {
-	printf("usage:\n\n");
-	printf("usage:\n\n");
-	printf("- SimpleMidi song.mid\n");
-	printf("- SimpleMidi -f folder_with_midis\n");
-        exit(0);
+        printf("usage:\n\n");
+        printf("- SimpleMidi -f <folder_with_midis> -m <midi_file>\n");
+            exit(0);
     }
 
     // Generate a default palette. The palette will persist and can be edited.
