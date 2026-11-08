@@ -1,6 +1,43 @@
 {
     "tasks": [
         {
+            "label": "Configure SimpleMidi (Debug)",
+            "type": "shell",
+            "command": "cmake",
+            "args": [
+                "-S",
+                "${workspaceFolder}",
+                "-B",
+                "${workspaceFolder}/build",
+                "-DCMAKE_BUILD_TYPE=Debug"
+            ],
+            "options": {
+                "cwd": "${workspaceFolder}"
+            },
+            "problemMatcher": [
+                "$gcc"
+            ]
+        },
+        {
+            "label": "Build SimpleMidi (Debug)",
+            "type": "shell",
+            "command": "cmake",
+            "args": [
+                "--build",
+                "${workspaceFolder}/build",
+                "--target",
+                "SimpleMidi"
+            ],
+            "dependsOn": "Configure SimpleMidi (Debug)",
+            "dependsOrder": "sequence",
+            "options": {
+                "cwd": "${workspaceFolder}"
+            },
+            "problemMatcher": [
+                "$gcc"
+            ]
+        },
+        {
             "type": "cppbuild",
             "label": "C/C++: g++-11 build active file",
             "command": "/usr/bin/g++-11",
