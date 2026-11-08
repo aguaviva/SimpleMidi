@@ -54,6 +54,7 @@ int map(int i, int ini, int fin, int out_ini, int out_fin)
 #include <dirent.h>
 #include <string>
 #include <vector>
+#include <algorithm>
 
 int get_midi_list(const char *pDir, std::vector<std::string> *pMidi_files)
 {
@@ -68,11 +69,13 @@ int get_midi_list(const char *pDir, std::vector<std::string> *pMidi_files)
         if (str.size()>3)
         {
             std::string ext = str.substr(str.size()-4,4);
-            if ( ext == ".mid")
+            if ( ext == ".mid" || ext == ".MID")
                 pMidi_files->push_back(str);
         }
     }
           
+    std::sort(pMidi_files->begin(), pMidi_files->end());
+
     closedir (dp);
     return 0;
   }
