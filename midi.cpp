@@ -49,7 +49,7 @@ uint32_t MidiTrack::process_next_event(MidiSendFunc pFunc)
         if (m_status == 0xff)
         {
             unsigned char metaType = GetByte();
-            unsigned char length = GetByte();
+            uint32_t length = GetVar();
 
             //LOG("    meta: 0x%02x", metaType);
             //LOG("    length: 0x%02x", length);
@@ -158,22 +158,19 @@ uint32_t MidiTrack::process_next_event(MidiSendFunc pFunc)
         }
         else if (m_status == 0xf0)
         {
-            LOG("System exclusive: ");
-            for (;;)
-            {
-                unsigned char c = GetByte();
-                if (c == 0xf7)
-                    break;
-                LOG("%02x ", c);
-            }
-            LOG("\n");
+            uint32_t length = GetVar();
+            Skip(length);
         }
         else if (m_status == 0xf7)
         {
-            unsigned char length = GetByte();
+            uint32_t length = GetVar();
             Skip(length);
         }
-        else if (m_status == 0xfd)
+        else if (m_status == 0xf1 || m_status == 0xf3)
+        {
+            GetByte();
+        }
+        else if (m_status == 0xf2)
         {
             GetByte();
             GetByte();
@@ -236,6 +233,12 @@ uint32_t MidiTrack::process_next_event(MidiSendFunc pFunc)
 uint32_t MidiTrack::seek(uint32_t midi_ticks, MidiSendFunc pFunc)
 {
     Reset();
+    MidiSendFunc stateFunc = [pFunc](uint8_t* data, size_t size) {
+        if (!pFunc || !data || size == 0) return;
+        const uint8_t command = data[0] & 0xf0;
+        if (command == 0x80 || command == 0x90) return;
+        pFunc(data, size);
+    };
     uint32_t deltaMidiTicks = 0;
     for(;;)
     {
@@ -244,7 +247,7 @@ uint32_t MidiTrack::seek(uint32_t midi_ticks, MidiSendFunc pFunc)
             return midi_ticks;
         }
 
-        if (process_next_event(NULL) == false)
+        if (process_next_event(stateFunc) == false)
             return m_nextTime;
 
         deltaMidiTicks = GetVar();

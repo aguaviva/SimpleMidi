@@ -1,8 +1,11 @@
 #pragma once
+#include <cstdint>
+#include <cstddef>
 
 class Instrument
 {
 public:
+    virtual ~Instrument() = default;
     bool m_mute = false;
     virtual void reset() {};
     virtual void send_midi(uint8_t* pdata, size_t size) = 0;

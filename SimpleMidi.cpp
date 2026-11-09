@@ -14,6 +14,8 @@
 #include <thread>
 #include <unit_tests.h>
 
+Instrument *GetMT32();
+
 const uint32_t sample_rate = 48000;
 
 size_t total_rendered_samples = 0;
@@ -64,8 +66,10 @@ class MidiPlayer
     {
         for (uint32_t t = 0; t < midi.GetTrackCount(); t++)
         {
-#ifdef MSFA_FOUND  
-            Instrument *instrument = GetDX7("./rom1a.syx");
+#ifdef HAS_MT32EMU
+            Instrument *instrument = GetMT32();
+//#elifdef MSFA_FOUND  
+//            Instrument *instrument = GetDX7("./rom1a.syx");
 #else            
             Instrument *instrument = GetNewPiano();
 #endif

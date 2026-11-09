@@ -112,6 +112,7 @@ struct MidiState
 ///////////////////////////////////////////////////////////////
 
 #include <functional>
+#include <vector>
 
 // Change from raw function pointer to std::function
 using MidiSendFunc = std::function<void(uint8_t*, size_t)>;
