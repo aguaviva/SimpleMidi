@@ -1,5 +1,5 @@
 #include "midi.h"
-
+#include <random>
 
 int main(int argc, char **argv)
 {
@@ -14,28 +14,35 @@ int main(int argc, char **argv)
 
     std::vector<uint8_t> eventBytes = {0x90, 0xBE, 0xEF};
 
-    printf("---\n");
-    pTrack->insertEventAtTick(0, eventBytes);
-    pTrack->print();
+    std::vector<uint32_t> l = {0, 100, 600, 800, 5000};
+    std::random_device rd;
+    std::mt19937 gen(rd());
+    for(uint32_t k=0;k<100;k++)
+    {
+        std::shuffle(l.begin(), l.end(), gen);    
 
-    printf("---\n");
-    pTrack->insertEventAtTick(100, eventBytes);
-    pTrack->print();
+        for(uint32_t i=0;i<l.size();i++)
+        {
+//            printf("- Inserting at %i\n", l[i]);
+            pTrack->insertEventAtTick(l[i], eventBytes);
+//            pTrack->print();
+        }
 
-    printf("---\n");
-    pTrack->insertEventAtTick(600, eventBytes);
+        for(uint32_t i=0;i<l.size();i++)
+        {
+//            printf("- Deleting at %i\n", l[i]);
+            pTrack->deleteEventAtTick(l[i], eventBytes);
+//            pTrack->print();
+        }
+    }
+    printf("--\n");
     pTrack->print();
-
-    printf("---\n");
-    pTrack->insertEventAtTick(5000, eventBytes);
-    pTrack->print();
-
 
     pTrack->seek(0, NULL);
-    printf("%i\n", pTrack->m_pTrack - pTrack->m_pTrackIni);
+    printf("%li\n", pTrack->m_pTrack - pTrack->m_pTrackIni);
 
     pTrack->seek(200, NULL);
-    printf("%i\n", pTrack->m_pTrack - pTrack->m_pTrackIni);
+    printf("%li\n", pTrack->m_pTrack - pTrack->m_pTrackIni);
 
 
 }

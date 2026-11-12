@@ -92,7 +92,52 @@ void MidiTrackEditable::GetTimes(ticks_t tick, ticks_t *prev_time, ticks_t *next
 
 bool MidiTrackEditable::deleteEventAtTick(uint32_t tick, const std::vector<uint8_t>& eventBytes)
 {
-    return true;
+    Reset();
+    ticks_t prev_time=0; 
+    ticks_t time=0; 
+    m_pTrack = m_pTrackIni;
+    while(!done())
+    {
+        prev_time = time;
+        time += GetVarPeek();
+        if (time>tick)
+        {
+            break;
+        }
+        if (time==tick)
+        {
+            ticks_t offset0 = (m_pTrack - m_pTrackIni);
+            GetVar();
+            ticks_t offset1 = (m_pTrack - m_pTrackIni);
+            process_next_event(NULL); 
+            ticks_t offset2 = (m_pTrack - m_pTrackIni);
+            if (std::equal(eventBytes.begin(), eventBytes.end(), m_trackData.begin() + offset1)==true)
+            {
+                uint32_t c1 = 0;
+                ticks_t next_time=0; 
+                std::vector<uint8_t> tick_data;
+                if (!done())
+                {
+                    c1 = GetVarSizePeek();
+                    next_time = time + GetVarPeek();
+                    appendVariableLength(tick_data, next_time - prev_time);
+                }
+
+                m_trackData.erase(m_trackData.begin()+offset0, m_trackData.begin()+offset2 + c1-tick_data.size());
+                std::copy(tick_data.begin(), tick_data.end(), m_trackData.begin() + offset0);
+
+                m_pTrackIni = m_trackData.data();
+                m_pTrackFin = m_trackData.data() + m_trackData.size();    
+                m_pTrack = m_pTrackIni + offset0;
+                return true;
+            }
+            continue;
+        }
+        GetVar();
+        process_next_event(NULL);    
+    }
+    
+    return false;
 }
 
 bool MidiTrackEditable::insertEventAtTick(uint32_t tick, const std::vector<uint8_t>& eventBytes)
