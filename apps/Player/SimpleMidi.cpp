@@ -12,7 +12,6 @@
 #include "inst-piano.h"
 #include "misc.h"
 #include <thread>
-#include <unit_tests.h>
 
 Instrument *GetMT32();
 

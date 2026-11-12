@@ -59,6 +59,34 @@ public:
         return out;
     }
 
+    uint32_t GetVarPeek()
+    {
+        uint32_t out = 0;
+
+        for (uint32_t i=0;;i++)
+        {
+            out <<= 7;
+            out += m_pTrack[i] & 0x7f;
+
+            if ((m_pTrack[i] & 0x80) == 0x00)
+                break;
+        }
+
+        return out;
+    }
+
+    uint32_t GetVarSizePeek()
+    {
+        uint32_t i=0;
+        for (;;) 
+        {
+            if ((m_pTrack[i] & 0x80) == 0x00)
+                return i+1;           
+            i++;
+        }
+    }
+
+
     uint8_t PeekByte()
     {
         return *m_pTrack;
@@ -119,9 +147,11 @@ using MidiSendFunc = std::function<void(uint8_t*, size_t)>;
 
 class MidiTrack : public MidiStream
 {
+protected:
     ticks_t m_nextTime = 0;
     unsigned char m_lastType = 0;
     uint64_t m_elapsed_microseconds = 0;
+
 public:
     MidiState *m_pMidiState;
     uint32_t m_channel;
@@ -132,11 +162,34 @@ public:
     uint32_t m_timesignatureDen = 4;
 
     MidiTrack(uint8_t *ini, uint8_t*fin, MidiState *pMidiState = NULL);
+    virtual ~MidiTrack() = default;
     void Reset();
     uint32_t process_next_event(MidiSendFunc pFunc);
     ticks_t play(ticks_t midi_ticks, MidiSendFunc pFunc);
     ticks_t seek(ticks_t midi_ticks, MidiSendFunc pFunc);
     uint32_t get_elapsed_milliseconds() { return m_elapsed_microseconds/1000; };
+    void print();    
+};
+
+class MidiTrackEditable : public MidiTrack
+{
+    struct InsertionPoint {
+        size_t deltaOffset;
+        size_t eventOffset;
+        uint32_t previousTick;
+        uint32_t nextTick;
+        bool afterEndOfTrack;
+        uint8_t runningStatus;
+    };
+
+    std::vector<uint8_t> m_trackData;
+    void GetTimes(ticks_t ticks, ticks_t *pPrev_time, ticks_t *pNext_time);
+public:
+    MidiTrackEditable(uint8_t *ini, uint8_t *fin, MidiState *pMidiState = NULL);
+    // Inserts a note at an absolute track tick; changes this track's in-memory MIDI data.
+    bool insertEventAtTick(uint32_t tick, const std::vector<uint8_t>& eventBytes);
+    bool deleteEventAtTick(uint32_t tick, const std::vector<uint8_t>& eventBytes);
+    bool insertNote(uint32_t tick, uint8_t key, uint8_t velocity, uint32_t durationTicks, uint8_t channel = 0);
 };
 
 ///////////////////////////////////////////////////////////////
@@ -157,10 +210,11 @@ public:
     MidiSong();
     uint32_t GetTrackCount() { return m_tracks; }
     MidiTrack *GetTrack(uint32_t i) { return m_pTrack[i]; }
+    MidiTrackEditable *GetEditableTrack(uint32_t i) { return dynamic_cast<MidiTrackEditable *>(m_pTrack[i]); }
     uint32_t get_elapsed_microseconds();
     uint32_t get_microseconds_per_quarter_note();
     size_t step(MidiSendFunc *pFunc);
     uint32_t seek(uint64_t microseconds, MidiSendFunc *pFunc=NULL);
-    bool LoadMidi(uint8_t *midi_buffer, size_t midi_buffer_size);
+    bool LoadMidi(uint8_t *midi_buffer, size_t midi_buffer_size, bool editable = false);
     void Reset();
 };

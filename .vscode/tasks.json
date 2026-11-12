@@ -38,6 +38,25 @@
             ]
         },
         {
+            "label": "Build Unit Tests (Debug)",
+            "type": "shell",
+            "command": "cmake",
+            "args": [
+                "--build",
+                "${workspaceFolder}/build",
+                "--target",
+                "unit_tests"
+            ],
+            "dependsOn": "Configure SimpleMidi (Debug)",
+            "dependsOrder": "sequence",
+            "options": {
+                "cwd": "${workspaceFolder}"
+            },
+            "problemMatcher": [
+                "$gcc"
+            ]
+        },
+        {
             "type": "cppbuild",
             "label": "C/C++: g++-11 build active file",
             "command": "/usr/bin/g++-11",

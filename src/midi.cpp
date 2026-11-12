@@ -13,11 +13,38 @@
 
 #define MIN(a,b) ((a<b)?a:b)
 
+uint32_t appendVariableLength(uint8_t *pOut, uint32_t value)
+{
+    if (value > 0x0fffffff) return 0;
+    int count = 0;
+    pOut[count++] = value & 0x7f;
+    while ((value >>= 7) != 0) {
+        pOut[count++] = (value & 0x7f) | 0x80;
+    }
+    return count;
+}
+
+int32_t appendVariableLength(std::vector<uint8_t>& output, uint32_t value)
+{
+    if (value > 0x0fffffff) return -1;
+    uint8_t bytes[4];
+    int count = 0, out;
+    bytes[count++] = value & 0x7f;
+    while ((value >>= 7) != 0) {
+        bytes[count++] = (value & 0x7f) | 0x80;
+    }
+    out = count;
+    while (count > 0) output.push_back(bytes[--count]);
+    return out;
+}
+
+
 ///////////////////////////////////////////////////////////////
 // MidiTrack
 ///////////////////////////////////////////////////////////////
 
-MidiTrack::MidiTrack(uint8_t *ini, uint8_t*fin, MidiState *pMidiState) : MidiStream(ini, fin)
+MidiTrack::MidiTrack(uint8_t *ini, uint8_t*fin, MidiState *pMidiState)
+    : MidiStream(ini, fin)
 {
     m_pMidiState = pMidiState;
     Reset();
@@ -27,13 +54,83 @@ void MidiTrack::Reset()
 { 
     MidiStream::Reset(); 
 
-    m_nextTime = GetVar();
+    m_nextTime = done() ? NO_EVENTS : GetVar();
     m_channel = -1;
     m_lastType = 0;
     m_TrackName = "none";
     m_InstrumentName = "none";
     m_status = 0;
     m_elapsed_microseconds = 0;
+}
+
+MidiTrackEditable::MidiTrackEditable(uint8_t *ini, uint8_t *fin, MidiState *pMidiState)
+    : MidiTrack(ini, fin, pMidiState), m_trackData(ini, fin)
+{
+    m_pTrackIni = m_trackData.data();
+    m_pTrackFin = m_trackData.data() + m_trackData.size();
+    MidiTrack::Reset();
+}
+
+void MidiTrackEditable::GetTimes(ticks_t tick, ticks_t *prev_time, ticks_t *next_time)
+{
+    Reset();
+
+    *prev_time=0; 
+    *next_time=0; 
+    m_pTrack = m_pTrackIni;
+    while(!done())
+    {
+        uint32_t t = GetVarPeek();
+        *prev_time = *next_time;
+        *next_time += t;
+        if (*next_time>tick)
+            break;
+        GetVar();
+        process_next_event(NULL);    
+    }
+}
+
+bool MidiTrackEditable::deleteEventAtTick(uint32_t tick, const std::vector<uint8_t>& eventBytes)
+{
+    return true;
+}
+
+bool MidiTrackEditable::insertEventAtTick(uint32_t tick, const std::vector<uint8_t>& eventBytes)
+{
+    ticks_t prev_time; 
+    ticks_t next_time;
+    GetTimes(tick, &prev_time, &next_time);
+
+    uint32_t c1 = 0;
+
+    std::vector<uint8_t> tick_data;
+    appendVariableLength(tick_data, tick - prev_time);
+    tick_data.insert(tick_data.end(), eventBytes.begin(), eventBytes.end());
+    if (!done())
+    {
+        c1 = GetVarSizePeek();
+        appendVariableLength(tick_data, next_time - tick);
+    }
+    
+    ticks_t offset = (m_pTrack - m_pTrackIni);
+    auto it = m_trackData.begin() + offset;
+    m_trackData.insert(it, tick_data.size() - (c1), 0xff);
+
+    std::copy(tick_data.begin(), tick_data.end(), m_trackData.begin() + offset);
+
+    m_pTrackIni = m_trackData.data();
+    m_pTrackFin = m_trackData.data() + m_trackData.size();    
+
+    return true;
+}
+
+bool MidiTrackEditable::insertNote(uint32_t tick, uint8_t key, uint8_t velocity, uint32_t durationTicks, uint8_t channel)
+{
+    if (key > 127 || velocity == 0 || velocity > 127 || channel > 15 || durationTicks == 0 || tick > UINT32_MAX - durationTicks) {
+        return false;
+    }
+    return insertEventAtTick(tick, {static_cast<uint8_t>(0x90 | channel), key, velocity}) &&
+        insertEventAtTick(tick + durationTicks, {static_cast<uint8_t>(0x80 | channel), key, 0});
 }
 
 uint32_t MidiTrack::process_next_event(MidiSendFunc pFunc)
@@ -285,6 +382,24 @@ ticks_t MidiTrack::play(ticks_t midi_ticks, MidiSendFunc pFunc)
     return m_nextTime;
 }
 
+void MidiTrack::print()
+{
+    Reset();
+    MidiSendFunc stateFunc = [this](uint8_t* data, size_t size) {
+        if (size==3)
+            printf("%08u :%02x %02x %02x\n", m_nextTime, data[0], data[1], data[2]);
+    };
+
+    uint32_t deltaMidiTicks = 0;
+    while(done()==false)
+    {
+        if (process_next_event(stateFunc) == false)
+            return;
+
+        deltaMidiTicks = GetVar();
+        m_nextTime += deltaMidiTicks;
+    }    
+}
 
 ///////////////////////////////////////////////////////////////
 // Midi
@@ -341,7 +456,7 @@ uint32_t MidiSong::seek(uint64_t microseconds, MidiSendFunc *pFunc)
     return (uint64_t)max_ticks * m_midi_state.m_microSecondsPerMidiTick;
 }
 
-bool MidiSong::LoadMidi(uint8_t *midi_buffer, size_t midi_buffer_size)
+bool MidiSong::LoadMidi(uint8_t *midi_buffer, size_t midi_buffer_size, bool editable)
 {
     MidiStream ch(midi_buffer, midi_buffer + midi_buffer_size);
 
@@ -368,7 +483,11 @@ bool MidiSong::LoadMidi(uint8_t *midi_buffer, size_t midi_buffer_size)
         if (ch.GetByte() == 'M' && ch.GetByte() == 'T' && ch.GetByte() == 'r' && ch.GetByte() == 'k')
         {
             int length = ch.GetLength(4);
-            m_pTrack[m_tracks] = new MidiTrack(ch.m_pTrack, ch.m_pTrack + length, &m_midi_state);
+            if (editable) {
+                m_pTrack[m_tracks] = new MidiTrackEditable(ch.m_pTrack, ch.m_pTrack + length, &m_midi_state);
+            } else {
+                m_pTrack[m_tracks] = new MidiTrack(ch.m_pTrack, ch.m_pTrack + length, &m_midi_state);
+            }
             m_pTrack[m_tracks]->play(0, NULL);
             ch.Skip(length);
             m_tracks++;
@@ -397,3 +516,5 @@ void MidiSong::Reset()
     for (uint32_t i=0;i<m_tracks;i++)
         m_pTrack[i]->Reset();      
 }
+
+

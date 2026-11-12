@@ -2,17 +2,16 @@
     "version": "0.2.0",
     "configurations": [
         {
-            "name": "(gdb) Launch",
+            "name": "(gdb) Player",
             "type": "cppdbg",
             "request": "launch",
             "preLaunchTask": "Build SimpleMidi (Debug)",
-            "program": "${workspaceFolder}/build/SimpleMidi",
+            "program": "${workspaceFolder}/build/apps/Player/SimpleMidi",
             "args": ["-f", "./midis"],
             "stopAtEntry": false,
             "cwd": "${workspaceFolder}",
             "externalConsole": false,
             "MIMode": "gdb",
-            "justMyCode": true, 
             "setupCommands": [
                 {
                     "description": "Enable pretty-printing for gdb",
@@ -20,6 +19,35 @@
                     "ignoreFailures": false
                 }
             ]
-        }
+        },
+        {
+            "name": "(gdb) Unit Test",
+            "type": "cppdbg",
+            "request": "launch",
+            "preLaunchTask": "Build Unit Tests (Debug)",
+            "program": "${workspaceFolder}/build/apps/unit_tests/unit_tests",
+            "args": [],
+            "stopAtEntry": false,
+            "cwd": "${workspaceFolder}/apps/unit_tests",
+            "externalConsole": false,
+            "MIMode": "gdb",
+            "setupCommands": [
+                {
+                    "description": "Enable pretty-printing for gdb",
+                    "text": "-enable-pretty-printing",
+                    "ignoreFailures": false
+                },
+                {
+                    "description": "Skip C++ standard library headers",
+                    "text": "-interpreter-exec console \"skip -gfi /usr/include/c++/*\"",
+                    "ignoreFailures": true
+                },
+                {
+                    "description": "Skip standard library bits headers",
+                    "text": "-interpreter-exec console \"skip -gfi **/bits/*.h\"",
+                    "ignoreFailures": true
+                }                                
+            ]
+        }        
     ]
 }
