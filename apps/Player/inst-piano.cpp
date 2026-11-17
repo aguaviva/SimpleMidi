@@ -128,44 +128,63 @@ public:
 
 class SquareWaveOscillator
 {
-    uint32_t m_time=0;
-    uint32_t m_period = 0;
-    uint32_t m_phase = 0;
-    bool m_square = false;
+    uint32_t m_time = 0;
+    uint32_t m_period = 0;       // Samples per full wave cycle
+    uint32_t m_phase = 0;        // 32-bit phase accumulator
+    uint32_t m_increment = 0;    // Precalculated phase step per sample
+
+    const int8_t* m_lut = nullptr; // Pointer to external 128-byte LUT
 
 public:
     void reset()
     {
-        m_time=0;
+        m_time = 0;
         m_period = 0;
         m_phase = 0;
-        m_square = false;
+        m_increment = 0;
+        // Note: m_lut typically persists across resets, but can be reset if desired
+    }
+
+    // Method to inject or bind the external LUT
+    void set_lut(const int8_t* lut)
+    {
+        m_lut = lut;
     }
 
     float render(uint32_t time)
     {
+        (void)time; // Kept for interface compatibility
         m_time++;
 
-        while (m_phase < time)
-        {
-            m_phase += m_period;
-            m_square = !m_square;
+        if (m_increment == 0 || m_lut == nullptr) {
+            return -1.0f;
         }
 
-        //return (float)(m_phase - time) / (float)m_period;
-        return m_square ? 1.0f : -1.0f;
+        // Advance phase accumulator (unsigned overflow handles wrap-around automatically)
+        m_phase += m_increment;
+
+        // Extract the top 7 bits to index into the 128-byte LUT (32 - 7 = 25)
+        uint8_t index = static_cast<uint8_t>(m_phase >> 25);
+
+        // Look up the sample value from the external table and cast to float
+        return static_cast<float>(m_lut[index]);
     }
 
     void press(uint32_t time, uint32_t period) 
     {
+        (void)time;
         m_time = 0;
-        m_phase = time;
-        m_period = period;
+        m_phase = 0;
+        set_period(period);
     }
 
     void set_period(uint32_t period)
     {
-        m_period = period;
+        m_period = std::max(1u, period);
+
+        // Convert samples-per-cycle into a 32-bit phase increment per sample.
+        // Full 32-bit range (2^32 = 4,294,967,296) represents one full cycle.
+        m_increment = static_cast<uint32_t>(4294967296ULL / m_period);
     }
 };
 
@@ -175,12 +194,20 @@ struct Channel
     uint32_t m_velocity = 0;
     uint8_t m_note = 0;
     uint32_t m_sample_rate = 0;
+    int8_t table[128];
     
 public:
     ADSR m_adsr;
 
     void set_sample_rate(uint32_t sample_rate)
     {
+        for (int i = 0; i < 128; ++i) {
+            table[i] = (i < 64) ? 1 : -1;
+        }
+        
+        osc.set_lut(table);
+        osc2.set_lut(table);
+
         m_sample_rate = sample_rate;
         m_adsr.set_sample_rate(sample_rate);
     }
