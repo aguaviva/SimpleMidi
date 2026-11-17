@@ -128,7 +128,6 @@ struct MidiState
     uint32_t m_time = 0;
     uint32_t m_ticksPerQuarterNote;  //or ticks per beat
     uint32_t m_midi_ticks_per_metronome_tick = 24;
-    uint32_t m_microSecondsPerMidiTick;
 };
 
 ///////////////////////////////////////////////////////////////
@@ -194,6 +193,7 @@ class MidiSong
     uint32_t m_elapsed_microseconds;
     uint32_t m_event_samples_to_render;
     uint32_t m_tempo_index;
+    uint32_t m_microSecondsPerMidiTick;
     std::vector<TempoChange> m_tempo_changes;
 
 public:

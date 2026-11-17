@@ -511,7 +511,7 @@ size_t MidiSong::step(MidiSendFunc *pFunc)
 {
     while(m_tempo_index<m_tempo_changes.size() && m_tempo_changes[m_tempo_index].absolute_tick==m_midi_state.m_time)
     {
-        m_midi_state.m_microSecondsPerMidiTick = m_tempo_changes[m_tempo_index].usPerQuarter / m_midi_state.m_ticksPerQuarterNote;
+        m_microSecondsPerMidiTick = m_tempo_changes[m_tempo_index].usPerQuarter / m_midi_state.m_ticksPerQuarterNote;
         m_tempo_index++;
     }
 
@@ -526,9 +526,9 @@ size_t MidiSong::step(MidiSendFunc *pFunc)
     uint32_t interval = nextEventTime - m_midi_state.m_time;
     m_midi_state.m_time = nextEventTime;
 
-    //LOG("%6i - %4i [%5i]\n", m_midi_state.m_time, interval, m_midi_state.m_microSecondsPerMidiTick);
+    //LOG("%6i - %4i [%5i]\n", m_midi_state.m_time, interval, m_microSecondsPerMidiTick);
 
-    uint64_t microseconds_to_render = ((uint64_t)interval * m_midi_state.m_microSecondsPerMidiTick);
+    uint64_t microseconds_to_render = ((uint64_t)interval * m_microSecondsPerMidiTick);
 
     m_elapsed_microseconds += microseconds_to_render;
 
@@ -542,7 +542,7 @@ uint32_t MidiSong::get_elapsed_microseconds()
 
 uint32_t MidiSong::get_microseconds_per_quarter_note()
 {
-    return (m_midi_state.m_microSecondsPerMidiTick * m_midi_state.m_ticksPerQuarterNote);
+    return (m_microSecondsPerMidiTick * m_midi_state.m_ticksPerQuarterNote);
 }
 
 
@@ -561,7 +561,7 @@ uint32_t MidiSong::seek(uint64_t microseconds, MidiSendFunc *pFunc)
             break;
         }
     }
-    m_midi_state.m_microSecondsPerMidiTick = mspq / m_midi_state.m_ticksPerQuarterNote;
+    m_microSecondsPerMidiTick = mspq / m_midi_state.m_ticksPerQuarterNote;
 
     // compute ticks
     ticks_t ticks_ = microseconds_to_ticks(microseconds);
@@ -586,11 +586,6 @@ bool MidiSong::LoadMidi(uint8_t *midi_buffer, size_t midi_buffer_size, bool edit
         uint32_t format = ch.GetLength(2);
         uint32_t tracks = ch.GetLength(2);
         m_midi_state.m_ticksPerQuarterNote = ch.GetLength(2);
-
-        uint32_t tempo = ((60 * 1000000) / 120);
-
-        m_midi_state.m_microSecondsPerMidiTick = tempo / m_midi_state.m_ticksPerQuarterNote;
-
         LOG("format %i, tracks %i, ticksPerQuarterNote %i\n", format, tracks, m_midi_state.m_ticksPerQuarterNote);
     }
 
