@@ -633,6 +633,16 @@ void MidiSong::compute_tempo_changes()
         total_ticks = MAX(total_ticks, ticks);
     }
 
+    // push defaults if not present
+    if (m_tempo_changes.size()==0 || m_tempo_changes[0].absolute_tick!=0)
+    {
+        TempoChange tc;
+        tc.absolute_tick = 0;
+        tc.usPerQuarter = 500000;
+        tc.absolute_microseconds = 0;
+        m_tempo_changes.insert(m_tempo_changes.begin(), tc);
+    }
+
     //add final marker
     TempoChange *pPrev = &m_tempo_changes.back();
     TempoChange tc;
@@ -645,8 +655,11 @@ void MidiSong::compute_tempo_changes()
     std::sort(m_tempo_changes.begin(), m_tempo_changes.end(), [](const TempoChange& a, const TempoChange& b) {
         return a.absolute_tick < b.absolute_tick; // Sort from lowest tick to highest
     });  
+}
 
-    printf("midi length: %f s\n", m_tempo_changes.back().absolute_microseconds/1e6f);
+uint64_t MidiSong::get_total_ms()
+{
+    return m_tempo_changes.back().absolute_microseconds;
 }
 
 ticks_t MidiSong::microseconds_to_ticks(uint32_t microseconds)
