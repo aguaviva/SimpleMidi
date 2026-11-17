@@ -1,7 +1,7 @@
 #include "midi.h"
 #include <random>
 
-int main(int argc, char **argv)
+void test_insertion()
 {
     size_t midi_size;
     uint8_t* pMidi_buffer;
@@ -43,6 +43,10 @@ int main(int argc, char **argv)
 
     pTrack->seek(200, NULL);
     printf("%li\n", pTrack->m_pTrack - pTrack->m_pTrackIni);
+}
 
+int main(int argc, char **argv)
+{
+    test_insertion();
 
 }

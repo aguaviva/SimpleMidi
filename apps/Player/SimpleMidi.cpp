@@ -34,6 +34,7 @@ class MidiPlayer
     MidiSendFunc pFunc[50];
     Instrument *instruments[50];
     uint32_t m_event_samples_to_render;
+    
 
     bool load(char *pFilename)
     {
@@ -44,7 +45,11 @@ class MidiPlayer
 
         midi.Reset();
         
-        return midi.LoadMidi(pMidi_buffer, midi_size);
+        if (midi.LoadMidi(pMidi_buffer, midi_size))
+        {
+            return true;            
+        }
+        return false;
     }
 
     void unload()
@@ -65,7 +70,7 @@ class MidiPlayer
     {
         for (uint32_t t = 0; t < midi.GetTrackCount(); t++)
         {
-#ifdef HAS_MT32EMU
+#ifndef HAS_MT32EMU
             Instrument *instrument = GetMT32();
 //#elifdef MSFA_FOUND  
 //            Instrument *instrument = GetDX7("./rom1a.syx");
@@ -270,7 +275,7 @@ public:
 };
 
 drawInst *pI;
-std::vector<float> ticks;
+std::vector<float> qn_ticks;
 void create_piano_roll(MidiSong *pMidi)
 {
     pI = new drawInst[pMidi->GetTrackCount()];
@@ -292,11 +297,22 @@ void create_piano_roll(MidiSong *pMidi)
         }
     }
 
-    ticks.clear();
-    for (int i=0;i<200;i++)
     {
-        //float milliseconds_per_midi_tick = (pMidi->m_midi_state.m_microSecondsPerMidiTick/ 1000.0f);
-        ticks.push_back((i*pMidi->get_microseconds_per_quarter_note())/1000000.0f);
+        qn_ticks.clear();
+        const std::vector<TempoChange> &tempo_changes = midi_player.midi.getTempoChanges();
+        for (int i=0;i<tempo_changes.size()-1;i++)
+        {
+            int32_t t0 = tempo_changes[i+0].absolute_tick;
+            int32_t t1 = tempo_changes[i+1].absolute_tick;
+            uint32_t uspmt = tempo_changes[i+0].usPerQuarter;
+            uint32_t tt = (t1-t0)/midi_player.midi.m_midi_state.m_ticksPerQuarterNote;
+            uint32_t time = t0/uspmt;
+            for(int t=0;t<tt;t++)
+            {
+                qn_ticks.push_back(time/1000000.0f);
+                time += uspmt;
+            }
+        }
     }
 
     pMidi->Reset();
@@ -367,9 +383,9 @@ void draw_track(drawInst *pInstDraw, const ImVec2 &canvas_p0, const ImVec2 &canv
     static bool opt_enable_grid = true;
     if (opt_enable_grid)
     {
-        for (float i = 0; i < ticks.size(); i++)
+        for (float i = 0; i < qn_ticks.size(); i++)
         {
-            float t = unlerp(ticks[i], time_ini, time_fin);            
+            float t = unlerp(qn_ticks[i], time_ini, time_fin);            
             float x = lerp(canvas_p0.x, canvas_p1.x, t);
             draw_list->AddLine(ImVec2(x, canvas_p0.y), ImVec2(x, canvas_p1.y), IM_COL32(200, 200, 200, 40));
         }

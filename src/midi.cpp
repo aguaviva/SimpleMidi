@@ -239,13 +239,9 @@ uint32_t MidiTrack::process_next_event(MidiSendFunc pFunc)
             }
             else if (metaType == 0x51)
             {
-                uint32_t microseconds_per_quarter = GetLength(3);
-                uint32_t beatsPerSecond = 1000000 / microseconds_per_quarter;
+                uint32_t microseconds_per_quarter = GetLength(3);                
+                uint32_t beatsPerSecond = 1000000 / microseconds_per_quarter;                
                 //LOG("    tempo: %i bpm/QNPM", beatsPerSecond * 60);
-                if (m_pMidiState)
-                {
-                    m_pMidiState->m_microSecondsPerMidiTick = (microseconds_per_quarter / m_pMidiState->m_ticksPerQuarterNote);
-                }
             }
             else if (metaType == 0x54)
             {
@@ -427,6 +423,49 @@ ticks_t MidiTrack::play(ticks_t midi_ticks, MidiSendFunc pFunc)
     return m_nextTime;
 }
 
+ticks_t MidiTrack::get_tempo_changes(std::vector<TempoChange> &tempo_changes)
+{
+    Reset();
+    ticks_t ticks = 0;
+    ticks_t microseconds = 0;
+    uint32_t prev_uspq = 500000;
+    ticks_t prev_ticks = 0;
+    while(!done())
+    {
+        uint8_t status = m_status;
+        if ((*m_pTrack & 0x80) > 0)
+        {
+            status = *m_pTrack;
+        }
+        if (status==0xff)
+        {
+            if (*(m_pTrack+1)==0x51)
+            {
+                uint32_t uspq = 0;
+                for (int i = 0; i < 3; i++)
+                    uspq = (uspq << 8) + *(m_pTrack+i+3);
+
+                microseconds += (ticks - prev_ticks) * prev_uspq / m_pMidiState->m_ticksPerQuarterNote;
+
+                TempoChange tc;
+                tc.absolute_tick = ticks;
+                tc.usPerQuarter = uspq;
+                tc.absolute_microseconds = microseconds;
+                tempo_changes.push_back(tc);
+
+                prev_ticks = ticks;
+                prev_uspq = uspq;
+            }
+        }
+
+        if (process_next_event(NULL) == false)
+            break;
+
+        ticks += GetVar();
+    }    
+    return ticks;
+}
+
 void MidiTrack::print()
 {
     Reset();
@@ -455,8 +494,27 @@ MidiSong::MidiSong()
     Reset();
 }
 
+void MidiSong::Reset() 
+{
+    m_event_samples_to_render = 0;
+    m_elapsed_microseconds = 0;
+    m_midi_state.m_time = 0;
+    m_tempo_index = 0;
+
+    //m_midi_state.m_microSecondsPerMidiTick = 500000 / m_midi_state.m_ticksPerQuarterNote;
+
+    for (uint32_t i=0;i<m_tracks;i++)
+        m_pTrack[i]->Reset();      
+}
+
 size_t MidiSong::step(MidiSendFunc *pFunc)
 {
+    while(m_tempo_index<m_tempo_changes.size() && m_tempo_changes[m_tempo_index].absolute_tick==m_midi_state.m_time)
+    {
+        m_midi_state.m_microSecondsPerMidiTick = m_tempo_changes[m_tempo_index].usPerQuarter / m_midi_state.m_ticksPerQuarterNote;
+        m_tempo_index++;
+    }
+
     uint32_t nextEventTime = NO_EVENTS;
     for (uint32_t t = 0; t < m_tracks; t++)
     {
@@ -487,10 +545,26 @@ uint32_t MidiSong::get_microseconds_per_quarter_note()
     return (m_midi_state.m_microSecondsPerMidiTick * m_midi_state.m_ticksPerQuarterNote);
 }
 
+
 uint32_t MidiSong::seek(uint64_t microseconds, MidiSendFunc *pFunc)
 {
     Reset();
-    ticks_t ticks_ = microseconds / m_midi_state.m_microSecondsPerMidiTick;
+
+    // compute tempo
+    uint32_t mspq = 500000;
+    for(uint32_t i=0; i<m_tempo_changes.size();i++)
+    {
+        if (m_tempo_changes[i].absolute_microseconds > microseconds)
+        {
+            if (i>=1)
+                mspq = m_tempo_changes[i-1].usPerQuarter;
+            break;
+        }
+    }
+    m_midi_state.m_microSecondsPerMidiTick = mspq / m_midi_state.m_ticksPerQuarterNote;
+
+    // compute ticks
+    ticks_t ticks_ = microseconds_to_ticks(microseconds);
     ticks_t max_ticks = 0;
     for(int i=0;i<m_tracks;i++)
     {
@@ -498,7 +572,7 @@ uint32_t MidiSong::seek(uint64_t microseconds, MidiSendFunc *pFunc)
         max_ticks = MAX(max_ticks, track_ticks);
     }
     m_midi_state.m_time = ticks_;
-    return (uint64_t)max_ticks * m_midi_state.m_microSecondsPerMidiTick;
+    return (uint64_t)ticks_to_microseconds(max_ticks);
 }
 
 bool MidiSong::LoadMidi(uint8_t *midi_buffer, size_t midi_buffer_size, bool editable)
@@ -539,27 +613,85 @@ bool MidiSong::LoadMidi(uint8_t *midi_buffer, size_t midi_buffer_size, bool edit
         }
     }
 
-    std::sort(m_midi_state.m_changes.begin(), m_midi_state.m_changes.end(), [](const TempoChange& a, const TempoChange& b) {
-        return a.absolute_tick < b.absolute_tick; // Sort from lowest tick to highest
-    });    
+    compute_tempo_changes();
 
-    //measure midi length
-    while(step(NULL) != NO_EVENTS) {}
-    float total_midi_time = get_elapsed_microseconds() / 1000000.0f;
-    printf("midi length: %f s\n", total_midi_time);
     Reset();
 
     return true;
 }
 
-void MidiSong::Reset() 
+void MidiSong::compute_tempo_changes()
 {
-    m_event_samples_to_render = 0;
-    m_elapsed_microseconds = 0;
-    m_midi_state.m_time = 0;
+    //measure midi length
+    ticks_t total_ticks = 0;
 
-    for (uint32_t i=0;i<m_tracks;i++)
-        m_pTrack[i]->Reset();      
+    // collect tempo changes
+    m_tempo_changes.clear();
+    for(uint32_t i=0;i<GetTrackCount();i++)
+    {
+        ticks_t ticks = GetTrack(i)->get_tempo_changes(m_tempo_changes);
+        total_ticks = MAX(total_ticks, ticks);
+    }
+
+    //add final marker
+    TempoChange *pPrev = &m_tempo_changes.back();
+    TempoChange tc;
+    tc.absolute_tick = total_ticks;
+    tc.usPerQuarter = 0;
+    tc.absolute_microseconds = pPrev->absolute_microseconds + ((uint64_t)(tc.absolute_tick - pPrev->absolute_tick) * (uint64_t)pPrev->usPerQuarter) / m_midi_state.m_ticksPerQuarterNote;
+    m_tempo_changes.push_back(tc);
+
+    std::sort(m_tempo_changes.begin(), m_tempo_changes.end(), [](const TempoChange& a, const TempoChange& b) {
+        return a.absolute_tick < b.absolute_tick; // Sort from lowest tick to highest
+    });  
+
+    printf("midi length: %f s\n", m_tempo_changes.back().absolute_microseconds/1e6f);
+}
+
+ticks_t MidiSong::microseconds_to_ticks(uint32_t microseconds)
+{
+    if (microseconds==0)
+        return 0;
+
+    uint32_t prev_ms = 0;
+    ticks_t prev_ticks = 0;
+    for(uint32_t i=0;i<m_tempo_changes.size();i++)
+    {
+        uint32_t ms = m_tempo_changes[i].absolute_microseconds;
+        ticks_t ticks = m_tempo_changes[i].absolute_tick;
+        if (ms>=microseconds)
+        {
+            uint32_t delta_ms = ms-prev_ms;
+            uint32_t delta_ticks = ticks-prev_ticks;
+            return prev_ticks + (uint64_t)delta_ticks * (microseconds - prev_ms) / delta_ms;
+        }
+        prev_ms = ms;
+        prev_ticks = ticks;
+    }
+    return m_tempo_changes.back().absolute_tick;
+}
+
+uint32_t MidiSong::ticks_to_microseconds(ticks_t ticks)
+{
+    if (ticks==0)
+        return 0;
+
+    uint32_t prev_ms = 0;
+    ticks_t prev_ticks = 0;
+    for(uint32_t i=0;i<m_tempo_changes.size();i++)
+    {
+        ticks_t curr_ticks = m_tempo_changes[i].absolute_tick;
+        uint32_t curr_ms = m_tempo_changes[i].absolute_microseconds;
+        if (curr_ticks>=ticks)
+        {
+            uint32_t delta_ms = curr_ms-prev_ms;
+            ticks_t delta_ticks = curr_ticks-prev_ticks;
+            return prev_ms + (uint64_t)delta_ms * (ticks - prev_ticks) / delta_ticks;
+        }
+        prev_ms = curr_ms;
+        prev_ticks = curr_ticks;
+    }
+    return m_tempo_changes.back().absolute_tick;
 }
 
 

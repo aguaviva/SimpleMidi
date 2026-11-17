@@ -117,13 +117,10 @@ public:
     }
 };
 
-class MidiSong;
-
-struct TempoChange
-{
-    uint64_t absolute_tick;
-    double mpqn;
-    uint64_t cumulative_microseconds;    
+struct TempoChange {
+    uint32_t absolute_tick; // When the tempo change happens
+    uint32_t usPerQuarter;  // Microseconds per quarter note (from FF 51 03)
+    uint32_t absolute_microseconds;
 };
 
 struct MidiState
@@ -132,7 +129,6 @@ struct MidiState
     uint32_t m_ticksPerQuarterNote;  //or ticks per beat
     uint32_t m_midi_ticks_per_metronome_tick = 24;
     uint32_t m_microSecondsPerMidiTick;
-    std::vector<TempoChange> m_changes;
 };
 
 ///////////////////////////////////////////////////////////////
@@ -164,6 +160,7 @@ public:
     MidiTrack(uint8_t *ini, uint8_t*fin, MidiState *pMidiState = NULL);
     virtual ~MidiTrack() = default;
     void Reset();
+    ticks_t get_tempo_changes(std::vector<TempoChange> &tempo_changes);
     uint32_t process_next_event(MidiSendFunc pFunc);
     ticks_t play(ticks_t midi_ticks, MidiSendFunc pFunc);
     ticks_t seek(ticks_t midi_ticks, MidiSendFunc pFunc);
@@ -173,17 +170,9 @@ public:
 
 class MidiTrackEditable : public MidiTrack
 {
-    struct InsertionPoint {
-        size_t deltaOffset;
-        size_t eventOffset;
-        uint32_t previousTick;
-        uint32_t nextTick;
-        bool afterEndOfTrack;
-        uint8_t runningStatus;
-    };
-
     std::vector<uint8_t> m_trackData;
     void GetTimes(ticks_t ticks, ticks_t *pPrev_time, ticks_t *pNext_time);
+
 public:
     MidiTrackEditable(uint8_t *ini, uint8_t *fin, MidiState *pMidiState = NULL);
     // Inserts a note at an absolute track tick; changes this track's in-memory MIDI data.
@@ -204,6 +193,9 @@ class MidiSong
     uint32_t m_output_channel_count;
     uint32_t m_elapsed_microseconds;
     uint32_t m_event_samples_to_render;
+    uint32_t m_tempo_index;
+    std::vector<TempoChange> m_tempo_changes;
+
 public:
     MidiState m_midi_state;
 
@@ -217,4 +209,8 @@ public:
     uint32_t seek(uint64_t microseconds, MidiSendFunc *pFunc=NULL);
     bool LoadMidi(uint8_t *midi_buffer, size_t midi_buffer_size, bool editable = false);
     void Reset();
+    void compute_tempo_changes();
+    const std::vector<TempoChange> &getTempoChanges() { return m_tempo_changes; };
+    ticks_t microseconds_to_ticks(uint32_t microseconds);
+    uint32_t ticks_to_microseconds(ticks_t ticks);
 };
