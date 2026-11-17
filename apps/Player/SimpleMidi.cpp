@@ -302,15 +302,14 @@ void create_piano_roll(MidiSong *pMidi)
         const std::vector<TempoChange> &tempo_changes = midi_player.midi.getTempoChanges();
         for (int i=0;i<tempo_changes.size()-1;i++)
         {
-            int32_t t0 = tempo_changes[i+0].absolute_tick;
-            int32_t t1 = tempo_changes[i+1].absolute_tick;
+            int32_t t0 = tempo_changes[i+0].absolute_microseconds;
+            int32_t t1 = tempo_changes[i+1].absolute_microseconds;
             uint32_t uspmt = tempo_changes[i+0].usPerQuarter;
-            uint32_t tt = (t1-t0)/midi_player.midi.m_midi_state.m_ticksPerQuarterNote;
-            uint32_t time = t0/uspmt;
+            uint32_t tt = (t1-t0)/uspmt;
             for(int t=0;t<tt;t++)
             {
-                qn_ticks.push_back(time/1000000.0f);
-                time += uspmt;
+                qn_ticks.push_back(t0/1000000.0f);
+                t0 += uspmt;
             }
         }
     }

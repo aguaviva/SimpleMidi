@@ -445,7 +445,7 @@ ticks_t MidiTrack::get_tempo_changes(std::vector<TempoChange> &tempo_changes)
                 for (int i = 0; i < 3; i++)
                     uspq = (uspq << 8) + *(m_pTrack+i+3);
 
-                microseconds += (ticks - prev_ticks) * prev_uspq / m_pMidiState->m_ticksPerQuarterNote;
+                microseconds += ((uint64_t)(ticks - prev_ticks) * (uint64_t)prev_uspq) / m_pMidiState->m_ticksPerQuarterNote;
 
                 TempoChange tc;
                 tc.absolute_tick = ticks;
@@ -638,7 +638,8 @@ void MidiSong::compute_tempo_changes()
     TempoChange tc;
     tc.absolute_tick = total_ticks;
     tc.usPerQuarter = 0;
-    tc.absolute_microseconds = pPrev->absolute_microseconds + ((uint64_t)(tc.absolute_tick - pPrev->absolute_tick) * (uint64_t)pPrev->usPerQuarter) / m_midi_state.m_ticksPerQuarterNote;
+    tc.absolute_microseconds = (uint64_t)pPrev->absolute_microseconds + ((uint64_t)(tc.absolute_tick - pPrev->absolute_tick) * (uint64_t)pPrev->usPerQuarter) / m_midi_state.m_ticksPerQuarterNote;
+    uint64_t mm = (uint64_t)pPrev->absolute_microseconds + ((uint64_t)(tc.absolute_tick - pPrev->absolute_tick) * (uint64_t)pPrev->usPerQuarter) / m_midi_state.m_ticksPerQuarterNote;
     m_tempo_changes.push_back(tc);
 
     std::sort(m_tempo_changes.begin(), m_tempo_changes.end(), [](const TempoChange& a, const TempoChange& b) {

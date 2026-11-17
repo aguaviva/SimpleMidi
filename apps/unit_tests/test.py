@@ -113,8 +113,34 @@ def test4():
     mid.save('4_pitchwheel.mid')
     print("Generated '4_pitchwheel' successfully!")
 
+def generate_tempo_test_midi(filename="tempo_test.mid", bpm_list=[60, 30, 10]):
+    """
+    Generates a MIDI file containing the same 10 notes played twice:
+    First section at bpm1, followed by a pause, tempo change, and the same notes at bpm2.
+    """
+    mid = mido.MidiFile(ticks_per_beat=480)
+    track = mido.MidiTrack()
+    mid.tracks.append(track)
+
+    # The exact same 10 notes (C-major scale spanning an octave and a half)
+    notes = [60, 62, 64, 65, 67, 69, 71, 72, 74, 75]
+    note_duration = 240  # Ticks per note (half a beat at 480 PPQ)
+
+    # --- SECTION 1: Play the 10 notes at BPM 1 ---
+    #track.append(mido.MetaMessage('set_tempo', tempo=mido.bpm2tempo(bpm1), time=0))
+
+    for bpm in bpm_list:
+        track.append(mido.MetaMessage('set_tempo', tempo=mido.bpm2tempo(bpm), time=0))  
+        
+        for note in notes:
+            track.append(mido.Message('note_on', note=note, velocity=64, time=0))
+            track.append(mido.Message('note_off', note=note, velocity=64, time=note_duration))
+
+    # Save to disk
+    mid.save(filename)
 
 
 test1()
 test2()
 test3()
+generate_tempo_test_midi("same_notes_tempo_change.mid", bpm_list=[240, 120,60, 30,10])
