@@ -267,6 +267,8 @@ uint32_t MidiTrack::process_next_event(MidiSendFunc pFunc)
             else if (metaType == 0x2F)
             {
                 if (length==0)
+                    return false;
+            }
             else if (metaType == 0x7f)
             {
                 LOG(" sequencer specific");
