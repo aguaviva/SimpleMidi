@@ -213,5 +213,6 @@ public:
     const std::vector<TempoChange> &getTempoChanges() { return m_tempo_changes; };
     ticks_t microseconds_to_ticks(uint32_t microseconds);
     uint32_t ticks_to_microseconds(ticks_t ticks);
-    uint64_t get_total_ms();
+    uint32_t get_bpm();
+    uint64_t get_total_us();
 };

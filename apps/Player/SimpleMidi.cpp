@@ -446,7 +446,7 @@ void doui(GLFWwindow* window)
         create_piano_roll(&midi_player.midi);
         midi_player.set_instruments();
 
-        midi_length = midi_player.seek(10000)/1e6;
+        midi_length = midi_player.midi.get_total_us()/1e6f;
         midi_player.seek(0);
         midi_player.play();
     }
@@ -454,8 +454,7 @@ void doui(GLFWwindow* window)
     MidiSong *pMidi = &midi_player.midi;
 
     ImGui::Text("Application average %.3f ms/frame (%.1f FPS)", 1000.0f / ImGui::GetIO().Framerate, ImGui::GetIO().Framerate);
-    float ms_per_quarter_note = (pMidi->m_midi_state.m_microSecondsPerMidiTick * pMidi->m_midi_state.m_ticksPerQuarterNote)/1000.0f;
-    int bpm = 60*1000/ms_per_quarter_note;
+    int bpm = pMidi->get_bpm();
     float time = total_rendered_samples / (float)sample_rate;
 
     ImGui::Text("BPM: %d time: %f total: %f", bpm, time, midi_length);

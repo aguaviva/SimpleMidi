@@ -642,7 +642,7 @@ void MidiSong::compute_tempo_changes()
     TempoChange *pPrev = &m_tempo_changes.back();
     TempoChange tc;
     tc.absolute_tick = total_ticks;
-    tc.usPerQuarter = 0;
+    tc.usPerQuarter = pPrev->usPerQuarter;
     tc.absolute_microseconds = (uint64_t)pPrev->absolute_microseconds + ((uint64_t)(tc.absolute_tick - pPrev->absolute_tick) * (uint64_t)pPrev->usPerQuarter) / m_midi_state.m_ticksPerQuarterNote;
     uint64_t mm = (uint64_t)pPrev->absolute_microseconds + ((uint64_t)(tc.absolute_tick - pPrev->absolute_tick) * (uint64_t)pPrev->usPerQuarter) / m_midi_state.m_ticksPerQuarterNote;
     m_tempo_changes.push_back(tc);
@@ -652,9 +652,24 @@ void MidiSong::compute_tempo_changes()
     });  
 }
 
-uint64_t MidiSong::get_total_ms()
+uint64_t MidiSong::get_total_us()
 {
     return m_tempo_changes.back().absolute_microseconds;
+}
+
+uint32_t MidiSong::get_bpm()
+{ 
+    uint32_t size = m_tempo_changes.size();
+    if (size==0)
+        return 120;
+
+    int32_t tempo = m_tempo_index-1;
+    if (tempo<0) 
+        tempo = 0;
+    if (tempo >= size)
+        tempo = size-1;
+
+    return 60000000/m_tempo_changes[tempo].usPerQuarter; 
 }
 
 ticks_t MidiSong::microseconds_to_ticks(uint32_t microseconds)
