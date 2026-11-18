@@ -127,7 +127,10 @@ struct MidiState
 {
     uint32_t m_time = 0;
     uint32_t m_ticksPerQuarterNote;  //or ticks per beat
-    uint32_t m_midi_ticks_per_metronome_tick = 24;
+    uint8_t m_time_signature_num;
+    uint8_t m_time_signature_den;
+    uint8_t m_metronome_click;  // midi clocks in a metronome click
+    uint8_t m_32notes_per_beat;     
 };
 
 ///////////////////////////////////////////////////////////////
@@ -203,16 +206,17 @@ public:
     uint32_t GetTrackCount() { return m_tracks; }
     MidiTrack *GetTrack(uint32_t i) { return m_pTrack[i]; }
     MidiTrackEditable *GetEditableTrack(uint32_t i) { return dynamic_cast<MidiTrackEditable *>(m_pTrack[i]); }
-    uint32_t get_elapsed_microseconds();
-    uint32_t get_microseconds_per_quarter_note();
     size_t step(MidiSendFunc *pFunc);
     uint32_t seek(uint64_t microseconds, MidiSendFunc *pFunc=NULL);
     bool LoadMidi(uint8_t *midi_buffer, size_t midi_buffer_size, bool editable = false);
     void Reset();
     void compute_tempo_changes();
     const std::vector<TempoChange> &getTempoChanges() { return m_tempo_changes; };
+    uint32_t get_mspq_at_time(uint64_t microseconds);
     ticks_t microseconds_to_ticks(uint32_t microseconds);
     uint32_t ticks_to_microseconds(ticks_t ticks);
     uint32_t get_bpm();
     uint64_t get_total_us();
+    uint32_t get_elapsed_microseconds();
+    uint32_t get_microseconds_per_quarter_note();
 };

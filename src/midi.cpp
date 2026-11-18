@@ -240,8 +240,6 @@ uint32_t MidiTrack::process_next_event(MidiSendFunc pFunc)
             else if (metaType == 0x51)
             {
                 uint32_t microseconds_per_quarter = GetLength(3);                
-                uint32_t beatsPerSecond = 1000000 / microseconds_per_quarter;                
-                //LOG("    tempo: %i bpm/QNPM", beatsPerSecond * 60);
             }
             else if (metaType == 0x54)
             {
@@ -254,17 +252,10 @@ uint32_t MidiTrack::process_next_event(MidiSendFunc pFunc)
             }
             else if (metaType == 0x58)
             {
-                m_timesignatureNum = GetByte();
-                m_timesignatureDen = 1 << GetByte();
-                unsigned char cc = GetByte();  // midi clocks in a metronome click
-                unsigned char bb = GetByte();  // number of 32nd notes per beat. This byte is usually 8 as there is usually one quarter note per beat and one quarter note contains eight 32nd notes.
-
-                if (m_pMidiState)
-                {
-                    m_pMidiState->m_midi_ticks_per_metronome_tick = cc;
-                }
-
-                LOG("time sig: %i/%i MIDI clocks per quarter-dotted %i\n", m_timesignatureNum, m_timesignatureDen, cc);
+                m_pMidiState->m_time_signature_num = GetByte();
+                m_pMidiState->m_time_signature_den = 1 << GetByte();
+                m_pMidiState->m_metronome_click = GetByte();  // midi clocks in a metronome click
+                m_pMidiState->m_32notes_per_beat = GetByte();  // number of 32nd notes per beat. This byte is usually 8 as there is usually one quarter note per beat and one quarter note contains eight 32nd notes.
             }
             else if (metaType == 0x59)
             {
@@ -275,9 +266,7 @@ uint32_t MidiTrack::process_next_event(MidiSendFunc pFunc)
             }
             else if (metaType == 0x2F)
             {
-                //unsigned char nn = GetByte();
-                LOG("************ THE END ************\n");
-            }
+                if (length==0)
             else if (metaType == 0x7f)
             {
                 LOG(" sequencer specific");
@@ -545,12 +534,8 @@ uint32_t MidiSong::get_microseconds_per_quarter_note()
     return (m_microSecondsPerMidiTick * m_midi_state.m_ticksPerQuarterNote);
 }
 
-
-uint32_t MidiSong::seek(uint64_t microseconds, MidiSendFunc *pFunc)
+uint32_t MidiSong::get_mspq_at_time(uint64_t microseconds)
 {
-    Reset();
-
-    // compute tempo
     uint32_t mspq = 500000;
     for(uint32_t i=0; i<m_tempo_changes.size();i++)
     {
@@ -561,6 +546,15 @@ uint32_t MidiSong::seek(uint64_t microseconds, MidiSendFunc *pFunc)
             break;
         }
     }
+    return mspq;
+}
+
+uint32_t MidiSong::seek(uint64_t microseconds, MidiSendFunc *pFunc)
+{
+    Reset();
+
+    // compute tempo
+    uint32_t mspq = get_mspq_at_time(microseconds);
     m_microSecondsPerMidiTick = mspq / m_midi_state.m_ticksPerQuarterNote;
 
     // compute ticks
