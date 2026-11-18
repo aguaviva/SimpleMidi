@@ -60,6 +60,7 @@ void MidiTrack::Reset()
     m_TrackName = "none";
     m_InstrumentName = "none";
     m_status = 0;
+    m_track_name.clear();
     m_elapsed_microseconds = 0;
 }
 
@@ -200,13 +201,14 @@ uint32_t MidiTrack::process_next_event(MidiSendFunc pFunc)
             {
                 const char* ChunkType[] = { "text event", "copyright", "track name", "instrument", "lyrics" };
 
+                std::string chunk_name((const char*)m_pTrack, length);
                 if (metaType == 3)
                 {
-                    m_TrackName = (char*)m_pTrack;
+                    m_track_name = chunk_name;
                 }
                 else if (metaType == 4)
                 {
-                    m_InstrumentName = (char*)m_pTrack;
+                    m_instrument_name = chunk_name;
                 }
 
                 LOG("    %s: ", ChunkType[metaType - 1]);
@@ -574,6 +576,9 @@ uint32_t MidiSong::seek(uint64_t microseconds, MidiSendFunc *pFunc)
 bool MidiSong::LoadMidi(uint8_t *midi_buffer, size_t midi_buffer_size, bool editable)
 {
     MidiStream ch(midi_buffer, midi_buffer + midi_buffer_size);
+
+    m_midi_state.m_time_signature_num = 4;
+    m_midi_state.m_time_signature_den = 4;
 
     if (ch.GetByte() == 'M' && ch.GetByte() == 'T' && ch.GetByte() == 'h' && ch.GetByte() == 'd')
     {

@@ -69,7 +69,7 @@ bool test_times()
         {
             Midi m;
             m.load(("../../midis/" + files[i]).c_str());
-            printf(" %3.2f\n", m.midi.get_total_ms()/1e6f);    
+            printf(" %3.2f\n", m.midi.get_total_us()/1e9f);    
         }
         
     }

@@ -5,6 +5,7 @@
 #include <stdint.h>
 #include <stdlib.h>
 #include <string.h>
+#include <string>
 
 #include "misc.h"
 
@@ -127,8 +128,8 @@ struct MidiState
 {
     uint32_t m_time = 0;
     uint32_t m_ticksPerQuarterNote;  //or ticks per beat
-    uint8_t m_time_signature_num;
-    uint8_t m_time_signature_den;
+    uint8_t m_time_signature_num = 4;
+    uint8_t m_time_signature_den = 4;
     uint8_t m_metronome_click;  // midi clocks in a metronome click
     uint8_t m_32notes_per_beat;     
 };
@@ -148,25 +149,22 @@ class MidiTrack : public MidiStream
 protected:
     ticks_t m_nextTime = 0;
     unsigned char m_lastType = 0;
-    uint64_t m_elapsed_microseconds = 0;
+    std::string m_track_name;
+    std::string m_instrument_name;
 
 public:
     MidiState *m_pMidiState;
     uint32_t m_channel;
-    const char* m_TrackName;
-    const char* m_InstrumentName;
     uint8_t m_status;
-    uint32_t m_timesignatureNum = 4;
-    uint32_t m_timesignatureDen = 4;
 
     MidiTrack(uint8_t *ini, uint8_t*fin, MidiState *pMidiState = NULL);
     virtual ~MidiTrack() = default;
     void Reset();
+    const std::string& get_track_name() const { return m_track_name; }
     ticks_t get_tempo_changes(std::vector<TempoChange> &tempo_changes);
     uint32_t process_next_event(MidiSendFunc pFunc);
     ticks_t play(ticks_t midi_ticks, MidiSendFunc pFunc);
     ticks_t seek(ticks_t midi_ticks, MidiSendFunc pFunc);
-    uint32_t get_elapsed_milliseconds() { return m_elapsed_microseconds/1000; };
     void print();    
 };
 
