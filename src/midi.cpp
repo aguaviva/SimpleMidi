@@ -274,7 +274,7 @@ uint32_t MidiTrack::process_next_event(MidiSendFunc pFunc)
             else if (metaType == 0x7f)
             {
                 LOG(" sequencer specific");
-                for (int i = 0; i < length; i++)
+                for (uint32_t i = 0; i < length; i++)
                 {
                     char c = GetByte();
                     LOG("%02x ", c);
@@ -564,7 +564,7 @@ uint32_t MidiSong::seek(uint64_t microseconds, MidiSendFunc *pFunc)
     // compute ticks
     ticks_t ticks_ = microseconds_to_ticks(microseconds);
     ticks_t max_ticks = 0;
-    for(int i=0;i<m_tracks;i++)
+    for(uint32_t i=0;i<m_tracks;i++)
     {
         ticks_t track_ticks = m_pTrack[i]->seek(ticks_, pFunc ? pFunc[i] : NULL);
         max_ticks = MAX(max_ticks, track_ticks);
@@ -645,7 +645,6 @@ void MidiSong::compute_tempo_changes()
     tc.absolute_tick = total_ticks;
     tc.usPerQuarter = pPrev->usPerQuarter;
     tc.absolute_microseconds = (uint64_t)pPrev->absolute_microseconds + ((uint64_t)(tc.absolute_tick - pPrev->absolute_tick) * (uint64_t)pPrev->usPerQuarter) / m_midi_state.m_ticksPerQuarterNote;
-    uint64_t mm = (uint64_t)pPrev->absolute_microseconds + ((uint64_t)(tc.absolute_tick - pPrev->absolute_tick) * (uint64_t)pPrev->usPerQuarter) / m_midi_state.m_ticksPerQuarterNote;
     m_tempo_changes.push_back(tc);
 
     std::sort(m_tempo_changes.begin(), m_tempo_changes.end(), [](const TempoChange& a, const TempoChange& b) {
@@ -664,11 +663,11 @@ uint32_t MidiSong::get_bpm()
     if (size==0)
         return 120;
 
-    int32_t tempo = m_tempo_index-1;
-    if (tempo<0) 
-        tempo = 0;
-    if (tempo >= size)
-        tempo = size-1;
+    uint32_t tempo = m_tempo_index;
+    if (tempo > size)
+        tempo = size;
+    if (tempo>0) 
+        tempo--;
 
     return 60000000/m_tempo_changes[tempo].usPerQuarter; 
 }
