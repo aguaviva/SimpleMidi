@@ -57,11 +57,10 @@ void MidiTrack::Reset()
     m_nextTime = done() ? NO_EVENTS : GetVar();
     m_channel = -1;
     m_lastType = 0;
-    m_TrackName = "none";
-    m_InstrumentName = "none";
+    m_track_name = "none";
+    m_instrument_name = "none";
     m_status = 0;
     m_track_name.clear();
-    m_elapsed_microseconds = 0;
 }
 
 MidiTrackEditable::MidiTrackEditable(uint8_t *ini, uint8_t *fin, MidiState *pMidiState)
@@ -419,6 +418,9 @@ ticks_t MidiTrack::play(ticks_t midi_ticks, MidiSendFunc pFunc)
 ticks_t MidiTrack::get_tempo_changes(std::vector<TempoChange> &tempo_changes)
 {
     Reset();
+    if (!m_pMidiState || m_pMidiState->m_ticksPerQuarterNote == 0)
+        return 0;
+
     ticks_t ticks = 0;
     ticks_t microseconds = 0;
     uint32_t prev_uspq = 500000;
@@ -502,6 +504,9 @@ void MidiSong::Reset()
 
 size_t MidiSong::step(MidiSendFunc *pFunc)
 {
+    if (m_midi_state.m_ticksPerQuarterNote == 0)
+        return NO_EVENTS;
+
     while(m_tempo_index<m_tempo_changes.size() && m_tempo_changes[m_tempo_index].absolute_tick==m_midi_state.m_time)
     {
         m_microSecondsPerMidiTick = m_tempo_changes[m_tempo_index].usPerQuarter / m_midi_state.m_ticksPerQuarterNote;
@@ -556,6 +561,8 @@ uint32_t MidiSong::get_mspq_at_time(uint64_t microseconds)
 uint32_t MidiSong::seek(uint64_t microseconds, MidiSendFunc *pFunc)
 {
     Reset();
+    if (m_tempo_changes.empty() || m_midi_state.m_ticksPerQuarterNote == 0)
+        return 0;
 
     // compute tempo
     uint32_t mspq = get_mspq_at_time(microseconds);
@@ -575,29 +582,46 @@ uint32_t MidiSong::seek(uint64_t microseconds, MidiSendFunc *pFunc)
 
 bool MidiSong::LoadMidi(uint8_t *midi_buffer, size_t midi_buffer_size, bool editable)
 {
+    if (!midi_buffer || midi_buffer_size < 14 ||
+        memcmp(midi_buffer, "MThd", 4) != 0)
+        return false;
+
     MidiStream ch(midi_buffer, midi_buffer + midi_buffer_size);
 
     m_midi_state.m_time_signature_num = 4;
     m_midi_state.m_time_signature_den = 4;
 
-    if (ch.GetByte() == 'M' && ch.GetByte() == 'T' && ch.GetByte() == 'h' && ch.GetByte() == 'd')
-    {
-        ch.GetLength(4);
+    ch.Skip(4);
+    const uint32_t header_length = ch.GetLength(4);
+    if (header_length < 6 || header_length > midi_buffer_size - 8)
+        return false;
 
-        uint32_t format = ch.GetLength(2);
-        uint32_t tracks = ch.GetLength(2);
-        m_midi_state.m_ticksPerQuarterNote = ch.GetLength(2);
-        LOG("format %i, tracks %i, ticksPerQuarterNote %i\n", format, tracks, m_midi_state.m_ticksPerQuarterNote);
-    }
+    uint32_t format = ch.GetLength(2);
+    uint32_t tracks = ch.GetLength(2);
+    m_midi_state.m_ticksPerQuarterNote = ch.GetLength(2);
+    if (m_midi_state.m_ticksPerQuarterNote == 0 || tracks > 50)
+        return false;
+    ch.Skip(static_cast<int>(header_length - 6));
+    LOG("format %i, tracks %i, ticksPerQuarterNote %i\n", format, tracks, m_midi_state.m_ticksPerQuarterNote);
 
     m_midi_state.m_time = 0;
 
     m_tracks = 0;
     while (ch.done() == false)
     {
-        if (ch.GetByte() == 'M' && ch.GetByte() == 'T' && ch.GetByte() == 'r' && ch.GetByte() == 'k')
+        if (static_cast<size_t>(ch.m_pTrackFin - ch.m_pTrack) < 8)
+            return false;
+
+        const bool is_track = memcmp(ch.m_pTrack, "MTrk", 4) == 0;
+        ch.Skip(4);
+        const uint32_t length = ch.GetLength(4);
+        if (length > static_cast<size_t>(ch.m_pTrackFin - ch.m_pTrack))
+            return false;
+
+        if (is_track)
         {
-            int length = ch.GetLength(4);
+            if (m_tracks >= 50)
+                return false;
             if (editable) {
                 m_pTrack[m_tracks] = new MidiTrackEditable(ch.m_pTrack, ch.m_pTrack + length, &m_midi_state);
             } else {
@@ -606,6 +630,10 @@ bool MidiSong::LoadMidi(uint8_t *midi_buffer, size_t midi_buffer_size, bool edit
             m_pTrack[m_tracks]->play(0, NULL);
             ch.Skip(length);
             m_tracks++;
+        }
+        else
+        {
+            ch.Skip(length);
         }
     }
 
@@ -623,6 +651,9 @@ void MidiSong::compute_tempo_changes()
 
     // collect tempo changes
     m_tempo_changes.clear();
+    if (m_midi_state.m_ticksPerQuarterNote == 0)
+        return;
+
     for(uint32_t i=0;i<GetTrackCount();i++)
     {
         ticks_t ticks = GetTrack(i)->get_tempo_changes(m_tempo_changes);
@@ -654,7 +685,7 @@ void MidiSong::compute_tempo_changes()
 
 uint64_t MidiSong::get_total_us()
 {
-    return m_tempo_changes.back().absolute_microseconds;
+    return m_tempo_changes.empty() ? 0 : m_tempo_changes.back().absolute_microseconds;
 }
 
 uint32_t MidiSong::get_bpm()
@@ -674,7 +705,7 @@ uint32_t MidiSong::get_bpm()
 
 ticks_t MidiSong::microseconds_to_ticks(uint32_t microseconds)
 {
-    if (microseconds==0)
+    if (microseconds == 0 || m_tempo_changes.empty())
         return 0;
 
     uint32_t prev_ms = 0;
@@ -697,7 +728,7 @@ ticks_t MidiSong::microseconds_to_ticks(uint32_t microseconds)
 
 uint32_t MidiSong::ticks_to_microseconds(ticks_t ticks)
 {
-    if (ticks==0)
+    if (ticks == 0 || m_tempo_changes.empty())
         return 0;
 
     uint32_t prev_ms = 0;
