@@ -161,6 +161,7 @@ public:
     virtual ~MidiTrack() = default;
     void Reset();
     const std::string& get_track_name() const { return m_track_name; }
+    const std::string& get_instrument_name() const { return m_instrument_name; }
     ticks_t get_tempo_changes(std::vector<TempoChange> &tempo_changes);
     uint32_t process_next_event(MidiSendFunc pFunc);
     ticks_t play(ticks_t midi_ticks, MidiSendFunc pFunc);

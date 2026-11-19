@@ -488,7 +488,7 @@ void doui(GLFWwindow* window)
         ImGui::PushID(t);
         ImGui::Checkbox("##", &midi_player.instruments[t]->m_mute);
         ImGui::SameLine();
-        ImGui::Text("%i %s %s", t, pTrack->m_instrument_name.c_str(), pTrack->m_track_name.c_str());
+        ImGui::Text("%i %s %s", t, pTrack->get_instrument_name().c_str(), pTrack->get_track_name().c_str());
 
         ImVec2 p0, p1;
         GenerateTrack(&p0, &p1);
